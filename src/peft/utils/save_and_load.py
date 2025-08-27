@@ -32,8 +32,16 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
     if state_dict is None:
         state_dict = model.state_dict()
         
-        # modified
-        if config.save_loranew == False:
+        # For SDLoRA: consolidate current task's LoRA directions before saving
+        if config.peft_type == PeftType.SDLORA and not config.save_loranew:
+            # Consolidate LoRA directions: W ← W ∪ {A_t B_t}
+            if hasattr(model, 'consolidate_lora_directions'):
+                model.consolidate_lora_directions()
+            # Update state_dict after consolidation
+            state_dict = model.state_dict()
+        
+        # Original concatenation logic for backward compatibility
+        if config.save_loranew == False and config.peft_type != PeftType.SDLORA:
             flag = 1 # this is a switch represents whether 'r_sum' is written to the config file
             for k in state_dict:
                 if "lora_A" in k:
@@ -51,7 +59,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
                             break # target modules have been matched
 
                 
-    if config.peft_type in (PeftType.LORA, PeftType.ADALORA):
+    if config.peft_type in (PeftType.LORA, PeftType.ADALORA, PeftType.SDLORA):
         # to_return = lora_state_dict(model, bias=model.peft_config.bias)
         # adapted from `https://github.com/microsoft/LoRA/blob/main/loralib/utils.py`
         # to be used directly with the state dict which is necessary when using DeepSpeed or FSDP
@@ -62,7 +70,19 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
             if config.save_loranew: 
                 to_return = {k: state_dict[k] for k in state_dict if "lora_" in k or "loranew_" in k} # modified
             else:
-                to_return = {k: state_dict[k] for k in state_dict if "lora_" in k}
+                base_keys = {k: state_dict[k] for k in state_dict if "lora_" in k}
+                # For SDLoRA with separate storage, also include historical directions and scalings
+                if config.peft_type == PeftType.SDLORA:
+                    historical_keys = {k: state_dict[k] for k in state_dict if "historical_directions" in k or "historical_scalings" in k}
+                    to_return = {**base_keys, **historical_keys}
+                else:
+                    to_return = base_keys
+                # Update r_sum for SDLoRA based on consolidated lora_A size
+                if config.peft_type == PeftType.SDLORA:
+                    for k, v in base_keys.items():
+                        if "lora_A" in k and adapter_name in k:
+                            config.r_sum = v.shape[0]  # Update r_sum based on current consolidated size
+                            break
 
         elif bias == "all":
             to_return = {k: state_dict[k] for k in state_dict if "lora_" in k or "bias" in k}
@@ -78,7 +98,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
             raise NotImplementedError
 
         # modified
-        to_return = {k: v for k, v in to_return.items() if (("lora_" in k and adapter_name in k) or ("bias" in k) or ("loranew_" in k))}
+        to_return = {k: v for k, v in to_return.items() if (("lora_" in k and adapter_name in k) or ("bias" in k) or ("loranew_" in k) or ("historical_directions" in k) or ("historical_scalings" in k))}
         
         if config.peft_type == PeftType.ADALORA:
             rank_pattern = config.rank_pattern
@@ -128,7 +148,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
     else:
         state_dict = peft_model_state_dict
 
-    if config.peft_type in (PeftType.LORA, PeftType.ADALORA):
+    if config.peft_type in (PeftType.LORA, PeftType.ADALORA, PeftType.SDLORA):
         peft_model_state_dict = {}
         for k, v in state_dict.items():
             if "lora_" in k:
@@ -156,6 +176,12 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
             rank_pattern = config.rank_pattern
             if rank_pattern is not None:
                 model.resize_modules_by_rank_pattern(rank_pattern, adapter_name)
+        elif config.peft_type == PeftType.SDLORA:
+            # For SDLoRA, ensure r_sum is updated based on loaded lora_A size
+            for k, v in peft_model_state_dict.items():
+                if "lora_A" in k and adapter_name in k:
+                    config.r_sum = v.shape[0]
+                    break
     elif isinstance(config, PromptLearningConfig) or config.peft_type == PeftType.ADAPTION_PROMPT:
         peft_model_state_dict = state_dict
     else:

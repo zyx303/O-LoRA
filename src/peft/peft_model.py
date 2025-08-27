@@ -32,6 +32,7 @@ from .tuners import (
     AdaLoraModel,
     AdaptionPromptModel,
     LoraModel,
+    SDLoraModel,
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
@@ -53,6 +54,7 @@ from .utils import (
 
 PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.LORA: LoraModel,
+    PeftType.SDLORA: SDLoraModel,
     PeftType.PROMPT_TUNING: PromptEmbedding,
     PeftType.P_TUNING: PromptEncoder,
     PeftType.PREFIX_TUNING: PrefixEncoder,

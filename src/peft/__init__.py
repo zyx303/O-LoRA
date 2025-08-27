@@ -32,6 +32,8 @@ from .tuners import (
     AdaptionPromptModel,
     LoraConfig,
     LoraModel,
+    SDLoraConfig,
+    SDLoraModel,
     AdaLoraConfig,
     AdaLoraModel,
     PrefixEncoder,

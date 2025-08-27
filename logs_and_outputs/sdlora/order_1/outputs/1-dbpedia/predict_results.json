@@ -1,0 +1,19 @@
+{
+    "epoch": 1.0,
+    "predict_exact_match": 98.6974,
+    "predict_exact_match_for_TC": 98.6974,
+    "predict_exact_match_for_dbpedia": 98.6974,
+    "predict_gen_len": 2.6538,
+    "predict_global_step": 875,
+    "predict_loss": 0.02394948899745941,
+    "predict_rouge1": 98.6974,
+    "predict_rouge1_for_TC": 98.6974,
+    "predict_rouge1_for_dbpedia": 98.6974,
+    "predict_rougeL": 98.6974,
+    "predict_rougeL_for_TC": 98.6974,
+    "predict_rougeL_for_dbpedia": 98.6974,
+    "predict_runtime": 34.6842,
+    "predict_samples": 7600,
+    "predict_samples_per_second": 219.12,
+    "predict_steps_per_second": 0.865
+}

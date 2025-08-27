@@ -44,7 +44,8 @@ from transformers import (
     set_seed, )
 from transformers.file_utils import is_offline_mode
 from transformers.trainer_utils import get_last_checkpoint
-from peft import get_peft_config, get_peft_model, LoraConfig, TaskType, PeftModel, PeftConfig # add
+from peft import get_peft_config, get_peft_model, LoraConfig, TaskType, PeftModel, PeftConfig  # add
+from peft import SDLoraConfig  # new
 
 from uie_collator import DataCollatorForUIE
 from uie_dataset_lora import gen_cache_path
@@ -117,6 +118,10 @@ class ModelArguments:
         metadata={
             "help": "Intrinsic dimension of the latent space."
         },
+    )
+    peft_type: Optional[str] = field(
+        default="LORA",
+        metadata={"help": "PEFT adapter type: LORA or SDLORA"},
     )
 
 
@@ -377,9 +382,19 @@ def main():
             revision=model_args.model_revision,
             use_auth_token=True if model_args.use_auth_token else None
         )
-        peft_config = LoraConfig(
-            task_type=TaskType.CAUSAL_LM, inference_mode=False, r=model_args.lora_dim, lora_alpha=32, lora_dropout=0.1
-        )
+        if model_args.peft_type.upper() == "SDLORA":
+            peft_config = SDLoraConfig(
+                task_type=TaskType.CAUSAL_LM,
+                inference_mode=False,
+                r=model_args.lora_dim,
+                lora_alpha=32,
+                lora_dropout=0.1,
+                save_loranew=True,
+            )
+        else:
+            peft_config = LoraConfig(
+                task_type=TaskType.CAUSAL_LM, inference_mode=False, r=model_args.lora_dim, lora_alpha=32, lora_dropout=0.1
+            )
         model = get_peft_model(model, peft_config)
     else:
         model = model_class.from_pretrained(
@@ -390,9 +405,19 @@ def main():
             revision=model_args.model_revision,
             use_auth_token=True if model_args.use_auth_token else None,
         )
-        peft_config = LoraConfig(
-            task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=model_args.lora_dim, lora_alpha=32, lora_dropout=0.1
-        )
+        if model_args.peft_type.upper() == "SDLORA":
+            peft_config = SDLoraConfig(
+                task_type=TaskType.SEQ_2_SEQ_LM,
+                inference_mode=False,
+                r=model_args.lora_dim,
+                lora_alpha=32,
+                lora_dropout=0.1,
+                save_loranew=True,
+            )
+        else:
+            peft_config = LoraConfig(
+                task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=model_args.lora_dim, lora_alpha=32, lora_dropout=0.1
+            )
         model = get_peft_model(model, peft_config)
 
     model.resize_token_embeddings(len(tokenizer))
@@ -582,6 +607,10 @@ def main():
 
     return results
 
-
+import os
+import debugpy
 if __name__ == "__main__":
+    if os.getenv('debug'):
+        debugpy.listen(5678)
+        debugpy.wait_for_client()
     main()
