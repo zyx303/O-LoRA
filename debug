@@ -1,0 +1,70 @@
+[2025-08-29 13:53:06,699] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2025-08-29 13:53:08,119] [WARNING] [runner.py:196:fetch_hostfile] Unable to find hostfile, will proceed with training with local resources only.
+Detected CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7: setting --include=localhost:0,1,2,3,4,5,6,7
+[2025-08-29 13:53:08,196] [INFO] [runner.py:555:main] cmd = /home/yongxi/miniconda3/envs/sd-lora/bin/python3.10 -u -m deepspeed.launcher.launch --world_info=eyJsb2NhbGhvc3QiOiBbMCwgMSwgMiwgMywgNCwgNSwgNiwgN119 --master_addr=127.0.0.1 --master_port=27249 --enable_each_rank_log=None src/run_uie_lora.py --do_train --do_predict --predict_with_generate --model_name_or_path initial_model/llama --data_dir CL_Benchmark --task_config_dir configs/order1_configs/dbpedia --instruction_file configs/instruction_config.json --instruction_strategy single --output_dir logs_and_outputs_llama/order_1/outputs/1-dbpedia --per_device_train_batch_size 1 --per_device_eval_batch_size 4 --gradient_accumulation_steps 8 --learning_rate 1e-03 --num_train_epochs 1 --deepspeed configs/ds_configs/stage2_llama.config --run_name order1_round1 --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --evaluation_strategy no --save_strategy no --save_steps 1500 --lamda_1 0.5 --lamda_2 0
+[2025-08-29 13:53:09,339] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2025-08-29 13:53:10,327] [INFO] [launch.py:145:main] WORLD INFO DICT: {'localhost': [0, 1, 2, 3, 4, 5, 6, 7]}
+[2025-08-29 13:53:10,327] [INFO] [launch.py:151:main] nnodes=1, num_local_procs=8, node_rank=0
+[2025-08-29 13:53:10,327] [INFO] [launch.py:162:main] global_rank_mapping=defaultdict(<class 'list'>, {'localhost': [0, 1, 2, 3, 4, 5, 6, 7]})
+[2025-08-29 13:53:10,327] [INFO] [launch.py:163:main] dist_world_size=8
+[2025-08-29 13:53:10,327] [INFO] [launch.py:165:main] Setting CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+[2025-08-29 13:53:12,677] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2025-08-29 13:53:12,752] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2025-08-29 13:53:12,771] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2025-08-29 13:53:12,772] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2025-08-29 13:53:12,772] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2025-08-29 13:53:12,823] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2025-08-29 13:53:12,829] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2025-08-29 13:53:12,837] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2025-08-29 13:53:13,569] [WARNING] [comm.py:152:init_deepspeed_backend] NCCL backend in DeepSpeed not yet implemented
+[2025-08-29 13:53:13,569] [INFO] [comm.py:616:init_distributed] cdb=None
+[2025-08-29 13:53:13,881] [WARNING] [comm.py:152:init_deepspeed_backend] NCCL backend in DeepSpeed not yet implemented
+[2025-08-29 13:53:13,881] [INFO] [comm.py:616:init_distributed] cdb=None
+[2025-08-29 13:53:13,986] [WARNING] [comm.py:152:init_deepspeed_backend] NCCL backend in DeepSpeed not yet implemented
+[2025-08-29 13:53:13,986] [INFO] [comm.py:616:init_distributed] cdb=None
+[2025-08-29 13:53:14,004] [WARNING] [comm.py:152:init_deepspeed_backend] NCCL backend in DeepSpeed not yet implemented
+[2025-08-29 13:53:14,004] [INFO] [comm.py:616:init_distributed] cdb=None
+[2025-08-29 13:53:14,004] [INFO] [comm.py:643:init_distributed] Initializing TorchBackend in DeepSpeed with backend nccl
+[2025-08-29 13:53:14,057] [WARNING] [comm.py:152:init_deepspeed_backend] NCCL backend in DeepSpeed not yet implemented
+[2025-08-29 13:53:14,058] [INFO] [comm.py:616:init_distributed] cdb=None
+[2025-08-29 13:53:14,090] [WARNING] [comm.py:152:init_deepspeed_backend] NCCL backend in DeepSpeed not yet implemented
+[2025-08-29 13:53:14,091] [INFO] [comm.py:616:init_distributed] cdb=None
+[2025-08-29 13:53:14,129] [WARNING] [comm.py:152:init_deepspeed_backend] NCCL backend in DeepSpeed not yet implemented
+[2025-08-29 13:53:14,129] [INFO] [comm.py:616:init_distributed] cdb=None
+[2025-08-29 13:53:14,131] [WARNING] [comm.py:152:init_deepspeed_backend] NCCL backend in DeepSpeed not yet implemented
+[2025-08-29 13:53:14,131] [INFO] [comm.py:616:init_distributed] cdb=None
+08/29/2025 13:53:14 - WARNING - __main__ - Process rank: 4, device: cuda:4, n_gpu: 1distributed training: True, 16-bits training: False
+08/29/2025 13:53:14 - WARNING - datasets.builder - Using custom data configuration default-8a6abe4434e90f8a
+Downloading and preparing dataset uie_instructions/default to logs_and_outputs_llama/order_1/outputs/1-dbpedia/17925c6a81583bc3da5a4b7d196aba0a/uie_instructions/default-8a6abe4434e90f8a/2.0.0/c490e7f13dec80785fc335819009163a45c86ae2816040c8d81800108e7e4374...
+08/29/2025 13:53:14 - WARNING - __main__ - Process rank: 1, device: cuda:1, n_gpu: 1distributed training: True, 16-bits training: False
+08/29/2025 13:53:14 - WARNING - datasets.builder - Using custom data configuration default-8a6abe4434e90f8a
+08/29/2025 13:53:14 - WARNING - __main__ - Process rank: 3, device: cuda:3, n_gpu: 1distributed training: True, 16-bits training: False
+08/29/2025 13:53:14 - WARNING - __main__ - Process rank: 7, device: cuda:7, n_gpu: 1distributed training: True, 16-bits training: False
+08/29/2025 13:53:14 - WARNING - datasets.builder - Using custom data configuration default-8a6abe4434e90f8a
+08/29/2025 13:53:14 - WARNING - datasets.builder - Using custom data configuration default-8a6abe4434e90f8a
+08/29/2025 13:53:14 - WARNING - __main__ - Process rank: 2, device: cuda:2, n_gpu: 1distributed training: True, 16-bits training: False
+08/29/2025 13:53:14 - WARNING - datasets.builder - Using custom data configuration default-8a6abe4434e90f8a
+08/29/2025 13:53:14 - WARNING - __main__ - Process rank: 0, device: cuda:0, n_gpu: 1distributed training: True, 16-bits training: False
+08/29/2025 13:53:14 - WARNING - datasets.builder - Using custom data configuration default-8a6abe4434e90f8a
+08/29/2025 13:53:14 - WARNING - __main__ - Process rank: 5, device: cuda:5, n_gpu: 1distributed training: True, 16-bits training: False
+08/29/2025 13:53:14 - WARNING - datasets.builder - Using custom data configuration default-8a6abe4434e90f8a
+08/29/2025 13:53:14 - WARNING - __main__ - Process rank: 6, device: cuda:6, n_gpu: 1distributed training: True, 16-bits training: False
+08/29/2025 13:53:14 - WARNING - datasets.builder - Using custom data configuration default-8a6abe4434e90f8a
+08/29/2025 13:53:15 - WARNING - datasets.builder - HF google storage unreachable. Downloading and preparing it from source
+Dataset uie_instructions downloaded and prepared to logs_and_outputs_llama/order_1/outputs/1-dbpedia/17925c6a81583bc3da5a4b7d196aba0a/uie_instructions/default-8a6abe4434e90f8a/2.0.0/c490e7f13dec80785fc335819009163a45c86ae2816040c8d81800108e7e4374. Subsequent calls will reuse this data.
+08/29/2025 13:53:16 - WARNING - datasets.builder - Reusing dataset uie_instructions (logs_and_outputs_llama/order_1/outputs/1-dbpedia/17925c6a81583bc3da5a4b7d196aba0a/uie_instructions/default-8a6abe4434e90f8a/2.0.0/c490e7f13dec80785fc335819009163a45c86ae2816040c8d81800108e7e4374)
+08/29/2025 13:53:16 - WARNING - datasets.builder - Reusing dataset uie_instructions (logs_and_outputs_llama/order_1/outputs/1-dbpedia/17925c6a81583bc3da5a4b7d196aba0a/uie_instructions/default-8a6abe4434e90f8a/2.0.0/c490e7f13dec80785fc335819009163a45c86ae2816040c8d81800108e7e4374)
+08/29/2025 13:53:16 - WARNING - datasets.builder - Reusing dataset uie_instructions (logs_and_outputs_llama/order_1/outputs/1-dbpedia/17925c6a81583bc3da5a4b7d196aba0a/uie_instructions/default-8a6abe4434e90f8a/2.0.0/c490e7f13dec80785fc335819009163a45c86ae2816040c8d81800108e7e4374)
+08/29/2025 13:53:16 - WARNING - datasets.builder - Reusing dataset uie_instructions (logs_and_outputs_llama/order_1/outputs/1-dbpedia/17925c6a81583bc3da5a4b7d196aba0a/uie_instructions/default-8a6abe4434e90f8a/2.0.0/c490e7f13dec80785fc335819009163a45c86ae2816040c8d81800108e7e4374)
+08/29/2025 13:53:16 - WARNING - datasets.builder - Reusing dataset uie_instructions (logs_and_outputs_llama/order_1/outputs/1-dbpedia/17925c6a81583bc3da5a4b7d196aba0a/uie_instructions/default-8a6abe4434e90f8a/2.0.0/c490e7f13dec80785fc335819009163a45c86ae2816040c8d81800108e7e4374)
+08/29/2025 13:53:16 - WARNING - datasets.builder - Reusing dataset uie_instructions (logs_and_outputs_llama/order_1/outputs/1-dbpedia/17925c6a81583bc3da5a4b7d196aba0a/uie_instructions/default-8a6abe4434e90f8a/2.0.0/c490e7f13dec80785fc335819009163a45c86ae2816040c8d81800108e7e4374)
+08/29/2025 13:53:16 - WARNING - datasets.builder - Reusing dataset uie_instructions (logs_and_outputs_llama/order_1/outputs/1-dbpedia/17925c6a81583bc3da5a4b7d196aba0a/uie_instructions/default-8a6abe4434e90f8a/2.0.0/c490e7f13dec80785fc335819009163a45c86ae2816040c8d81800108e7e4374)
+[2025-08-29 13:53:33,307] [INFO] [launch.py:315:sigkill_handler] Killing subprocess 2121207
+[2025-08-29 13:53:34,310] [INFO] [launch.py:315:sigkill_handler] Killing subprocess 2121208
+[2025-08-29 13:53:34,766] [INFO] [launch.py:315:sigkill_handler] Killing subprocess 2121209
+[2025-08-29 13:53:34,929] [INFO] [launch.py:315:sigkill_handler] Killing subprocess 2121210
+[2025-08-29 13:53:35,252] [INFO] [launch.py:315:sigkill_handler] Killing subprocess 2121211
+[2025-08-29 13:53:35,278] [INFO] [launch.py:315:sigkill_handler] Killing subprocess 2121212
+[2025-08-29 13:53:35,510] [INFO] [launch.py:315:sigkill_handler] Killing subprocess 2121213
+[2025-08-29 13:53:35,531] [INFO] [launch.py:315:sigkill_handler] Killing subprocess 2121214
+[2025-08-29 13:53:35,549] [INFO] [launch.py:324:sigkill_handler] Main process received SIGINT, exiting

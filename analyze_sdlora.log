@@ -1,0 +1,312 @@
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:124: UserWarning: std(): degrees of freedom is <= 0. Correction should be strictly less than the reduction factor (input numel divided by output numel). (Triggered internally at /pytorch/aten/src/ATen/native/ReduceOps.cpp:1831.)
+  print(f"      样例lora_A统计: mean={sample_A.mean():.6f}, std={sample_A.std():.6f}, norm={torch.norm(sample_A):.6f}")
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:128: UserWarning: std(): degrees of freedom is <= 0. Correction should be strictly less than the reduction factor (input numel divided by output numel). (Triggered internally at /pytorch/aten/src/ATen/native/ReduceOps.cpp:1831.)
+  print(f"      样例lora_B统计: mean={sample_B.mean():.6f}, std={sample_B.std():.6f}, norm={torch.norm(sample_B):.6f}")
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:389: UserWarning: marker is redundantly defined by the 'marker' keyword argument and the fmt string "o-" (-> marker='o'). The keyword argument will take precedence.
+  ax3.plot(range(len(tasks)), cumulative_directions, 'o-', label='历史方向数量', marker='o')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:390: UserWarning: marker is redundantly defined by the 'marker' keyword argument and the fmt string "s-" (-> marker='s'). The keyword argument will take precedence.
+  ax3.plot(range(len(tasks)), cumulative_scalings, 's-', label='历史scaling数量', marker='s')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 20219 (\N{CJK UNIFIED IDEOGRAPH-4EFB}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 21153 (\N{CJK UNIFIED IDEOGRAPH-52A1}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 21442 (\N{CJK UNIFIED IDEOGRAPH-53C2}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 25968 (\N{CJK UNIFIED IDEOGRAPH-6570}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 37327 (\N{CJK UNIFIED IDEOGRAPH-91CF}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 19981 (\N{CJK UNIFIED IDEOGRAPH-4E0D}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 21516 (\N{CJK UNIFIED IDEOGRAPH-540C}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 31867 (\N{CJK UNIFIED IDEOGRAPH-7C7B}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 22411 (\N{CJK UNIFIED IDEOGRAPH-578B}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 23545 (\N{CJK UNIFIED IDEOGRAPH-5BF9}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 27604 (\N{CJK UNIFIED IDEOGRAPH-6BD4}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 21382 (\N{CJK UNIFIED IDEOGRAPH-5386}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 21490 (\N{CJK UNIFIED IDEOGRAPH-53F2}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 26041 (\N{CJK UNIFIED IDEOGRAPH-65B9}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 21521 (\N{CJK UNIFIED IDEOGRAPH-5411}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 24207 (\N{CJK UNIFIED IDEOGRAPH-5E8F}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 21495 (\N{CJK UNIFIED IDEOGRAPH-53F7}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 32047 (\N{CJK UNIFIED IDEOGRAPH-7D2F}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 31215 (\N{CJK UNIFIED IDEOGRAPH-79EF}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 36235 (\N{CJK UNIFIED IDEOGRAPH-8D8B}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:425: UserWarning: Glyph 21183 (\N{CJK UNIFIED IDEOGRAPH-52BF}) missing from font(s) DejaVu Sans.
+  plt.tight_layout()
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 21442 (\N{CJK UNIFIED IDEOGRAPH-53C2}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 25968 (\N{CJK UNIFIED IDEOGRAPH-6570}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 37327 (\N{CJK UNIFIED IDEOGRAPH-91CF}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 19981 (\N{CJK UNIFIED IDEOGRAPH-4E0D}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 21516 (\N{CJK UNIFIED IDEOGRAPH-540C}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 31867 (\N{CJK UNIFIED IDEOGRAPH-7C7B}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 22411 (\N{CJK UNIFIED IDEOGRAPH-578B}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 23545 (\N{CJK UNIFIED IDEOGRAPH-5BF9}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 27604 (\N{CJK UNIFIED IDEOGRAPH-6BD4}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 20219 (\N{CJK UNIFIED IDEOGRAPH-4EFB}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 21153 (\N{CJK UNIFIED IDEOGRAPH-52A1}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 21382 (\N{CJK UNIFIED IDEOGRAPH-5386}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 21490 (\N{CJK UNIFIED IDEOGRAPH-53F2}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 26041 (\N{CJK UNIFIED IDEOGRAPH-65B9}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 21521 (\N{CJK UNIFIED IDEOGRAPH-5411}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 32047 (\N{CJK UNIFIED IDEOGRAPH-7D2F}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 31215 (\N{CJK UNIFIED IDEOGRAPH-79EF}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 36235 (\N{CJK UNIFIED IDEOGRAPH-8D8B}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 21183 (\N{CJK UNIFIED IDEOGRAPH-52BF}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 24207 (\N{CJK UNIFIED IDEOGRAPH-5E8F}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+/home/yongxi/work/O-LoRA/analyze_sdlora_scaling.py:426: UserWarning: Glyph 21495 (\N{CJK UNIFIED IDEOGRAPH-53F7}) missing from font(s) DejaVu Sans.
+  plt.savefig('/home/yongxi/work/O-LoRA/sdlora_scaling_analysis.png', dpi=300, bbox_inches='tight')
+开始分析SDLoRA的scaling机制...
+
+=== SDLoRA Scaling Mechanisms Analysis ===
+
+分析任务: 1-dbpedia
+------------------------------------------------------------
+1. 权重键分析:
+   当前任务LoRA权重 (loranew_*):
+      共 0 个loranew权重
+   历史LoRA权重 (lora_*):
+      共 288 个历史lora权重
+   历史方向权重 (historical_directions):
+      共 432 个历史方向权重
+   历史scaling权重 (historical_scalings):
+      共 144 个历史scaling参数
+
+2. 权重形状和值分析:
+   2.1 当前任务LoRA权重 (loranew_*):
+      loranew_A权重: 0 个
+      loranew_B权重: 0 个
+   2.2 历史LoRA权重 (lora_*):
+      lora_A权重: 144 个
+      lora_B权重: 144 个
+      样例lora_A形状: torch.Size([0, 1024])
+      样例lora_A统计: mean=nan, std=nan, norm=0.000000
+      样例lora_B形状: torch.Size([1024, 0])
+      样例lora_B统计: mean=nan, std=nan, norm=0.000000
+      ⚠️  lora_A有空维度，表示没有历史方向
+   2.3 历史方向存储 (historical_directions):
+      找到 432 个历史方向参数:
+      涉及 72 个不同的层
+        层 base_model.model.encoder.block.0.layer.0.SelfAttention:
+          包含 1 个历史方向:
+        层 base_model.model.encoder.block.1.layer.0.SelfAttention:
+          包含 1 个历史方向:
+        层 base_model.model.encoder.block.2.layer.0.SelfAttention:
+          包含 1 个历史方向:
+   2.4 历史scaling参数 (historical_scalings):
+      找到 144 个历史scaling参数:
+        scaling值统计:
+          平均值: 0.800781
+          标准差: 0.000000
+          范围: [0.800781, 0.800781]
+          唯一值: {0.80078125}
+        按层分析 (显示前3层):
+          SelfAttention:
+            dir_0: 0.800781
+            dir_0: 0.800781
+          SelfAttention:
+            dir_0: 0.800781
+            dir_0: 0.800781
+          SelfAttention:
+            dir_0: 0.800781
+            dir_0: 0.800781
+
+================================================================================
+
+分析任务: 2-amazon
+------------------------------------------------------------
+1. 权重键分析:
+   当前任务LoRA权重 (loranew_*):
+      共 0 个loranew权重
+   历史LoRA权重 (lora_*):
+      共 288 个历史lora权重
+   历史方向权重 (historical_directions):
+      共 720 个历史方向权重
+   历史scaling权重 (historical_scalings):
+      共 288 个历史scaling参数
+
+2. 权重形状和值分析:
+   2.1 当前任务LoRA权重 (loranew_*):
+      loranew_A权重: 0 个
+      loranew_B权重: 0 个
+   2.2 历史LoRA权重 (lora_*):
+      lora_A权重: 144 个
+      lora_B权重: 144 个
+      样例lora_A形状: torch.Size([0, 1024])
+      样例lora_A统计: mean=nan, std=nan, norm=0.000000
+      样例lora_B形状: torch.Size([1024, 0])
+      样例lora_B统计: mean=nan, std=nan, norm=0.000000
+      ⚠️  lora_A有空维度，表示没有历史方向
+   2.3 历史方向存储 (historical_directions):
+      找到 720 个历史方向参数:
+      涉及 72 个不同的层
+        层 base_model.model.encoder.block.0.layer.0.SelfAttention:
+          包含 2 个历史方向:
+        层 base_model.model.encoder.block.1.layer.0.SelfAttention:
+          包含 2 个历史方向:
+        层 base_model.model.encoder.block.2.layer.0.SelfAttention:
+          包含 2 个历史方向:
+   2.4 历史scaling参数 (historical_scalings):
+      找到 288 个历史scaling参数:
+        scaling值统计:
+          平均值: 0.898872
+          标准差: 0.098535
+          范围: [0.800781, 1.031250]
+          唯一值: {0.98828125, 0.80078125, 0.9921875, 0.99609375, 0.98046875, 1.0078125, 1.0, 0.9765625, 1.015625, 0.984375, 0.97265625, 1.0234375, 0.96875, 0.9609375, 1.03125}
+        按层分析 (显示前3层):
+          SelfAttention:
+            dir_0: 0.988281
+            dir_1: 0.800781
+            dir_0: 0.996094
+            dir_1: 0.800781
+          SelfAttention:
+            dir_0: 0.980469
+            dir_1: 0.800781
+            dir_0: 0.988281
+            dir_1: 0.800781
+          SelfAttention:
+            dir_0: 0.988281
+            dir_1: 0.800781
+            dir_0: 0.992188
+            dir_1: 0.800781
+
+================================================================================
+
+分析任务: 3-yahoo
+------------------------------------------------------------
+1. 权重键分析:
+   当前任务LoRA权重 (loranew_*):
+      共 288 个loranew权重
+   历史LoRA权重 (lora_*):
+      共 288 个历史lora权重
+   历史方向权重 (historical_directions):
+      共 0 个历史方向权重
+   历史scaling权重 (historical_scalings):
+      共 0 个历史scaling参数
+
+2. 权重形状和值分析:
+   2.1 当前任务LoRA权重 (loranew_*):
+      loranew_A权重: 144 个
+      loranew_B权重: 144 个
+      样例loranew_A形状: torch.Size([8, 1024])
+      样例loranew_A统计: mean=0.000074, std=0.037598, norm=3.406250
+      样例loranew_B形状: torch.Size([1024, 8])
+      样例loranew_B统计: mean=0.000119, std=0.031982, norm=2.890625
+      loranew_A非零比例: 8192/8192 (100.00%)
+   2.2 历史LoRA权重 (lora_*):
+      lora_A权重: 144 个
+      lora_B权重: 144 个
+      样例lora_A形状: torch.Size([0, 1024])
+      样例lora_A统计: mean=nan, std=nan, norm=0.000000
+      样例lora_B形状: torch.Size([1024, 0])
+      样例lora_B统计: mean=nan, std=nan, norm=0.000000
+      ⚠️  lora_A有空维度，表示没有历史方向
+   2.3 历史方向存储 (historical_directions):
+      ⚠️  未找到historical_directions参数
+   2.4 历史scaling参数 (historical_scalings):
+      ⚠️  未找到historical_scalings参数
+
+================================================================================
+
+分析任务: 4-agnews
+------------------------------------------------------------
+1. 权重键分析:
+   当前任务LoRA权重 (loranew_*):
+      共 288 个loranew权重
+   历史LoRA权重 (lora_*):
+      共 288 个历史lora权重
+   历史方向权重 (historical_directions):
+      共 0 个历史方向权重
+   历史scaling权重 (historical_scalings):
+      共 0 个历史scaling参数
+
+2. 权重形状和值分析:
+   2.1 当前任务LoRA权重 (loranew_*):
+      loranew_A权重: 144 个
+      loranew_B权重: 144 个
+      样例loranew_A形状: torch.Size([8, 1024])
+      样例loranew_A统计: mean=0.000082, std=0.039551, norm=3.593750
+      样例loranew_B形状: torch.Size([1024, 8])
+      样例loranew_B统计: mean=-0.000006, std=0.034424, norm=3.109375
+      loranew_A非零比例: 8192/8192 (100.00%)
+   2.2 历史LoRA权重 (lora_*):
+      lora_A权重: 144 个
+      lora_B权重: 144 个
+      样例lora_A形状: torch.Size([0, 1024])
+      样例lora_A统计: mean=nan, std=nan, norm=0.000000
+      样例lora_B形状: torch.Size([1024, 0])
+      样例lora_B统计: mean=nan, std=nan, norm=0.000000
+      ⚠️  lora_A有空维度，表示没有历史方向
+   2.3 历史方向存储 (historical_directions):
+      ⚠️  未找到historical_directions参数
+   2.4 历史scaling参数 (historical_scalings):
+      ⚠️  未找到historical_scalings参数
+
+================================================================================
+
+=== 跨任务Scaling机制比较 ===
+
+任务对比表:
+任务           loranew    hist_dir   hist_scale   scaling值            
+----------------------------------------------------------------------
+
+=== Scaling演化分析 ===
+
+1. 历史方向数量演化:
+
+2. Scaling值分布:
+
+3. Scaling机制分析:
+   根据代码分析:
+   - self.scaling: 当前任务的固定scaling (代码中设为0.8)
+   - self.historical_scalings: 历史方向的可训练scaling参数
+   - historical_directions: 存储历史A和B矩阵，权重被冻结
+
+可视化结果已保存为 'sdlora_scaling_analysis.png'
+
+分析结果已保存到: /home/yongxi/work/O-LoRA/sdlora_scaling_analysis.json
+
+=== 总结 ===
+SDLoRA的三种scaling机制:
+1. self.scaling: 当前任务的固定scaling因子 (代码中设为0.8)
+2. self.historical_directions: 存储历史LoRA方向的A和B矩阵 (权重冻结)
+3. self.historical_scalings: 每个历史方向对应的可训练scaling参数
+
+这种设计允许:
+- 保持历史知识不被遗忘 (通过frozen的historical_directions)
+- 动态调整历史知识的贡献 (通过trainable的historical_scalings)
+- 学习新任务的表示 (通过当前的loranew_A/B)
