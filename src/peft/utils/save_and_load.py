@@ -41,7 +41,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
             state_dict = model.state_dict()
         
         # Original concatenation logic for backward compatibility
-        if config.save_loranew == False and config.peft_type != PeftType.SDLORA:
+        if not isinstance(config, PromptLearningConfig) and config.save_loranew == False and config.peft_type != PeftType.SDLORA:
             flag = 1 # this is a switch represents whether 'r_sum' is written to the config file
             for k in state_dict:
                 if "lora_A" in k:
@@ -113,11 +113,20 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
         to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
     elif isinstance(config, PromptLearningConfig):
         to_return = {}
-        if config.inference_mode:
-            prompt_embeddings = model.prompt_encoder[adapter_name].embedding.weight
+        if config.peft_type == PeftType.L2P:
+            # 保存 L2P 的 prompt 池与 key
+            l2p = model.prompt_encoder[adapter_name]
+            if not hasattr(l2p, "prompt") or not hasattr(l2p, "prompt_key"):
+                raise ValueError("L2P: prompt/prompt_key 未找到，无法持久化")
+            to_return["prompt_pool"] = l2p.prompt.detach().cpu()
+            to_return["prompt_key"] = l2p.prompt_key.detach().cpu()
         else:
-            prompt_embeddings = model.get_prompt_embedding_to_save(adapter_name)
-        to_return["prompt_embeddings"] = prompt_embeddings
+            # 其他 PromptLearningConfig 维持原逻辑
+            if config.inference_mode:
+                prompt_embeddings = model.prompt_encoder[adapter_name].embedding.weight
+            else:
+                prompt_embeddings = model.get_prompt_embedding_to_save(adapter_name)
+            to_return["prompt_embeddings"] = prompt_embeddings
     else:
         raise NotImplementedError
     if model.modules_to_save is not None:
@@ -264,7 +273,19 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                     config.r_sum = v.shape[0]
                     break
     elif isinstance(config, PromptLearningConfig) or config.peft_type == PeftType.ADAPTION_PROMPT:
-        peft_model_state_dict = state_dict
+        if config.peft_type == PeftType.L2P:
+            # 从 state_dict 恢复 L2P 的 prompt 池与 key（直接写入参数）
+            l2p = model.prompt_encoder[adapter_name]
+            if "prompt_pool" in state_dict:
+                with torch.no_grad():
+                    l2p.prompt.data.copy_(state_dict["prompt_pool"].to(l2p.prompt.dtype))
+            if "prompt_key" in state_dict and hasattr(l2p, "prompt_key"):
+                with torch.no_grad():
+                    l2p.prompt_key.data.copy_(state_dict["prompt_key"].to(l2p.prompt_key.dtype))
+            # 已手动复制，避免再通过 load_state_dict 加载这些键
+            peft_model_state_dict = {}
+        else:
+            peft_model_state_dict = state_dict
     else:
         raise NotImplementedError
 
@@ -273,7 +294,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
         for k, v in peft_model_state_dict.items():
             f.write(f"{k}: {v}\n")
     model.load_state_dict(peft_model_state_dict, strict=False)
-    if isinstance(config, PromptLearningConfig):
-        model.prompt_encoder[adapter_name].embedding.load_state_dict(
-            {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
-        )
+    if isinstance(config, PromptLearningConfig) and config.peft_type != PeftType.L2P:
+         model.prompt_encoder[adapter_name].embedding.load_state_dict(
+             {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
+         )

@@ -245,6 +245,7 @@ class UIETrainingArguments(Seq2SeqTrainingArguments):
     do_demo: bool = field(default=False, metadata={"help": "Whether to run the model as a demo in the terminal."})
     lamda_1: float = field(default = 0.5)
     lamda_2: float = field(default = 0)
+    regularization: bool = field(default=True)
 
 
 def main():
@@ -537,7 +538,8 @@ def main():
     print(f"-----Gradient checkpointing: {training_args.gradient_checkpointing} -----")
     if training_args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
-
+    if model_args.peft_type.upper() == "L2P":
+        training_args.regularization = False
     trainer = UIETrainer(
         model=model,
         args=training_args,

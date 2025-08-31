@@ -37,7 +37,6 @@ class L2PConfig(PromptLearningConfig):
 
     Args:
         pool_size (`int`): The size of the prompt pool.
-        selection_size (`int`): The number of prompts to select from the pool for each input.
         prompt_init (Union[[`L2PInit`], `str`]): The initialization method for prompts.
         top_k (`int`): The number of top prompts to select based on similarity.
         shared_prompt_pool (`bool`): Whether to share prompt pool across tasks.
@@ -50,12 +49,8 @@ class L2PConfig(PromptLearningConfig):
     """
 
     pool_size: int = field(
-        default=10,
+        default=20,
         metadata={"help": "The size of the prompt pool"},
-    )
-    selection_size: int = field(
-        default=5,
-        metadata={"help": "The number of prompts to select from the pool"},
     )
     prompt_init: Union[L2PInit, str] = field(
         default=L2PInit.UNIFORM,
@@ -116,7 +111,6 @@ class L2PPromptPool(torch.nn.Module):
     ...     num_virtual_tokens=5,
     ...     token_dim=768,
     ...     pool_size=10,
-    ...     selection_size=5,
     ...     top_k=5,
     ... )
     >>> l2p_pool = L2PPromptPool(config)
@@ -134,7 +128,6 @@ class L2PPromptPool(torch.nn.Module):
     def __init__(self, config):
         super().__init__()
         self.pool_size = config.pool_size
-        self.selection_size = config.selection_size
         self.top_k = config.top_k
         self.num_virtual_tokens = config.num_virtual_tokens
         self.token_dim = config.token_dim

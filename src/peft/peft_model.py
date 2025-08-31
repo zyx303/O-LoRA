@@ -1081,7 +1081,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 decoder_input_ids = shift_tokens_right(
                     labels, self.config.pad_token_id, self.config.decoder_start_token_id
                 )
-                decoder_inputs_embeds = self.word_embeddings(decoder_input_ids)
+            decoder_inputs_embeds = self.word_embeddings(decoder_input_ids)
 
             if attention_mask is not None:
                 # concat prompt attention mask
@@ -1091,7 +1091,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
             if labels is not None:
                 if peft_config.num_transformer_submodules == 1:
                     kwargs["labels"] = labels
-                elif peft_config.num_transformer_submodules == 2:
+                elif peft_config.num_transformer_submodules == 2 and peft_config.peft_type != PeftType.L2P:
                     prefix_labels = torch.full((batch_size, peft_config.num_virtual_tokens), -100).to(self.device)
                     kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
             prompts = self.get_prompt(batch_size=batch_size)# (batch_size, num_virtual_tokens, token_dim)
@@ -1100,9 +1100,10 @@ class PeftModelForSeq2SeqLM(PeftModel):
             if peft_config.num_transformer_submodules == 1:
                 return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
             elif peft_config.num_transformer_submodules == 2:
-                decoder_inputs_embeds = torch.cat(
-                    (prompts[:, peft_config.num_virtual_tokens :], decoder_inputs_embeds), dim=1
-                )
+                if peft_config.peft_type != PeftType.L2P:
+                    decoder_inputs_embeds = torch.cat(
+                        (prompts[:, peft_config.num_virtual_tokens :], decoder_inputs_embeds), dim=1
+                    )
                 return self.base_model(
                     inputs_embeds=inputs_embeds, decoder_inputs_embeds=decoder_inputs_embeds, **kwargs
                 )
@@ -1131,6 +1132,9 @@ class PeftModelForSeq2SeqLM(PeftModel):
                     kwargs["token_type_ids"] = None
 
                 if peft_config.peft_type == PeftType.PREFIX_TUNING:
+                    outputs = self.base_model.generate(**kwargs)
+                elif peft_config.peft_type == PeftType.L2P:
+                    # L2P: 动态选择并拼接 encoder 侧 prompt，由 _prepare_encoder_decoder_kwargs_for_generation 完成
                     outputs = self.base_model.generate(**kwargs)
                 else:
                     raise NotImplementedError
