@@ -963,11 +963,35 @@ class PeftModelForCausalLM(PeftModel):
                 model_kwargs["past_key_values"] = past_key_values
             else:
                 if model_kwargs["past_key_values"] is None:
-                    inputs_embeds = self.word_embeddings(model_kwargs["input_ids"])
-                    prompts = self.get_prompt(batch_size=model_kwargs["input_ids"].shape[0])
-                    prompts = prompts.to(inputs_embeds.dtype)
-                    model_kwargs["inputs_embeds"] = torch.cat((prompts, inputs_embeds), dim=1)
-                    model_kwargs["input_ids"] = None
+                    if peft_config.peft_type == PeftType.L2P:
+                        # 首步根据输入动态选择并拼接 prompts
+                        input_ids = model_kwargs["input_ids"]
+                        inputs_embeds = self.word_embeddings(input_ids)
+                        prompt_pool = self.prompt_encoder[self.active_adapter]
+                        prompt_results = prompt_pool(
+                            x_embed=inputs_embeds,
+                            cls_features=None,
+                            task_id=model_kwargs.pop("task_id", None),
+                            train=self.training,
+                        )
+                        selected_prompts = prompt_results["selected_prompts"].to(inputs_embeds.dtype)
+                        # 拼接 attention mask
+                        if model_kwargs.get("attention_mask", None) is not None:
+                            prefix_attention_mask = torch.ones(
+                                input_ids.shape[0], selected_prompts.shape[1], device=model_kwargs["attention_mask"].device
+                            )
+                            model_kwargs["attention_mask"] = torch.cat(
+                                (prefix_attention_mask, model_kwargs["attention_mask"]), dim=1
+                            )
+                        model_kwargs["inputs_embeds"] = torch.cat((selected_prompts, inputs_embeds), dim=1)
+                        model_kwargs["input_ids"] = None
+                    else:
+                        # 其他静态 prompt 方法
+                        inputs_embeds = self.word_embeddings(model_kwargs["input_ids"])
+                        prompts = self.get_prompt(batch_size=model_kwargs["input_ids"].shape[0])
+                        prompts = prompts.to(inputs_embeds.dtype)
+                        model_kwargs["inputs_embeds"] = torch.cat((prompts, inputs_embeds), dim=1)
+                        model_kwargs["input_ids"] = None
 
         return model_kwargs
 
@@ -1172,6 +1196,48 @@ class PeftModelForSeq2SeqLM(PeftModel):
                     )
             model_kwargs["past_key_values"] = past_key_values
 
+        return model_kwargs
+
+    # 为 L2P 适配：在生成前为 encoder 动态拼接 prompts
+    def _prepare_encoder_decoder_kwargs_for_generation(self, *args, **kwargs):
+        peft_config = self.active_peft_config
+        # 先调用原始实现，拿到基础的 model_kwargs
+        model_kwargs = self.base_model_prepare_encoder_decoder_kwargs_for_generation(*args, **kwargs)
+        if not isinstance(peft_config, PromptLearningConfig) or peft_config.peft_type != PeftType.L2P:
+            return model_kwargs
+
+        # 获取输入 input_ids（按 transformers 的签名，input_ids 是第一个位置参数）
+        input_ids = args[0] if len(args) > 0 else kwargs.get("input_ids")
+        if input_ids is None:
+            return model_kwargs
+
+        # 准备 encoder 输入并进行 L2P 动态选择
+        attention_mask = model_kwargs.get("attention_mask", None)
+        inputs_embeds = self.word_embeddings(input_ids)
+        prompt_pool = self.prompt_encoder[self.active_adapter]
+        prompt_results = prompt_pool(
+            x_embed=inputs_embeds,
+            cls_features=None,
+            task_id=model_kwargs.pop("task_id", None),
+            train=self.training,
+        )
+        selected_prompts = prompt_results["selected_prompts"].to(inputs_embeds.dtype)
+
+        # 拼接 attention mask（encoder 侧）
+        if attention_mask is not None:
+            prefix_attention_mask = torch.ones(
+                inputs_embeds.shape[0], selected_prompts.shape[1], device=attention_mask.device, dtype=attention_mask.dtype
+            )
+            attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
+
+        encoder_inputs = torch.cat((selected_prompts, inputs_embeds), dim=1)
+
+        # 直接计算 encoder_outputs，避免原实现只接受 input_ids 的限制
+        encoder = self.base_model.get_encoder()
+        encoder_outputs = encoder(inputs_embeds=encoder_inputs, attention_mask=attention_mask, return_dict=True)
+
+        model_kwargs["encoder_outputs"] = encoder_outputs
+        model_kwargs["attention_mask"] = attention_mask
         return model_kwargs
 
 
