@@ -24,3 +24,4 @@ from .sdlora import SDLoraConfig, SDLoraModel
 from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparameterizationType
 from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
 from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
+from .l2p import L2PPromptPool, L2PConfig, L2PInit

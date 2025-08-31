@@ -44,6 +44,9 @@ from .tuners import (
     PromptEncoderReparameterizationType,
     PromptTuningConfig,
     PromptTuningInit,
+    L2PPromptPool,
+    L2PConfig,
+    L2PInit,
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,

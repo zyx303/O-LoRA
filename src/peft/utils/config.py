@@ -32,6 +32,7 @@ class PeftType(str, enum.Enum):
     ADALORA = "ADALORA"
     ADAPTION_PROMPT = "ADAPTION_PROMPT"
     SDLORA = "SDLORA"
+    L2P = "L2P"
 
 
 class TaskType(str, enum.Enum):
