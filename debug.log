@@ -1,0 +1,153 @@
++ export CUDA_DEVICE_ORDER=PCI_BUS_ID
++ CUDA_DEVICE_ORDER=PCI_BUS_ID
++ export TRANSFORMERS_CACHE=/data/yongxi/.cache/huggingface
++ TRANSFORMERS_CACHE=/data/yongxi/.cache/huggingface
+++ shuf -i25000-30000 -n1
++ port=25775
++ CUDA_VISIBLE_DEVICES=7
++ deepspeed --master_port 25775 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --model_name_or_path logs_and_outputs/debug/order_1/outputs/1-dbpedia/adapter --data_dir CL_Benchmark --task_config_dir configs/order1_configs/amazon --instruction_file configs/instruction_config.json --instruction_strategy single --output_dir logs_and_outputs/debug/order_1/outputs/2-amazon --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 1 --learning_rate 1e-03 --num_train_epochs 1 --deepspeed configs/ds_configs/stage2.config --run_name order1_round2_sdlora --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --evaluation_strategy no --save_strategy no --save_steps 1500 --lamda_1 0.5 --lamda_2 0 --peft_type SDLORA --max_train_samples 20 --max_eval_samples 10 --max_predict_samples 10
+[2025-08-28 18:13:01,111] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/deepspeed/runtime/zero/linear.py:49: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  def forward(ctx, input, weight, bias=None):
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/deepspeed/runtime/zero/linear.py:67: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  def backward(ctx, grad_output):
+[2025-08-28 18:13:02,171] [WARNING] [runner.py:196:fetch_hostfile] Unable to find hostfile, will proceed with training with local resources only.
+Detected CUDA_VISIBLE_DEVICES=7: setting --include=localhost:7
+[2025-08-28 18:13:02,249] [INFO] [runner.py:555:main] cmd = /home/yongxi/miniconda3/envs/sd-lora/bin/python3.10 -u -m deepspeed.launcher.launch --world_info=eyJsb2NhbGhvc3QiOiBbN119 --master_addr=127.0.0.1 --master_port=25775 --enable_each_rank_log=None src/run_uie_lora.py --do_train --do_predict --predict_with_generate --model_name_or_path logs_and_outputs/debug/order_1/outputs/1-dbpedia/adapter --data_dir CL_Benchmark --task_config_dir configs/order1_configs/amazon --instruction_file configs/instruction_config.json --instruction_strategy single --output_dir logs_and_outputs/debug/order_1/outputs/2-amazon --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 1 --learning_rate 1e-03 --num_train_epochs 1 --deepspeed configs/ds_configs/stage2.config --run_name order1_round2_sdlora --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --evaluation_strategy no --save_strategy no --save_steps 1500 --lamda_1 0.5 --lamda_2 0 --peft_type SDLORA --max_train_samples 20 --max_eval_samples 10 --max_predict_samples 10
+[2025-08-28 18:13:03,378] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/deepspeed/runtime/zero/linear.py:49: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  def forward(ctx, input, weight, bias=None):
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/deepspeed/runtime/zero/linear.py:67: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  def backward(ctx, grad_output):
+[2025-08-28 18:13:04,747] [INFO] [launch.py:145:main] WORLD INFO DICT: {'localhost': [7]}
+[2025-08-28 18:13:04,747] [INFO] [launch.py:151:main] nnodes=1, num_local_procs=1, node_rank=0
+[2025-08-28 18:13:04,747] [INFO] [launch.py:162:main] global_rank_mapping=defaultdict(<class 'list'>, {'localhost': [0]})
+[2025-08-28 18:13:04,747] [INFO] [launch.py:163:main] dist_world_size=1
+[2025-08-28 18:13:04,747] [INFO] [launch.py:165:main] Setting CUDA_VISIBLE_DEVICES=7
+[2025-08-28 18:13:06,938] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/deepspeed/runtime/zero/linear.py:49: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  def forward(ctx, input, weight, bias=None):
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/deepspeed/runtime/zero/linear.py:67: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  def backward(ctx, grad_output):
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/fairscale/experimental/nn/offload.py:19: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  return torch.cuda.amp.custom_fwd(orig_func)  # type: ignore
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/fairscale/experimental/nn/offload.py:30: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  return torch.cuda.amp.custom_bwd(orig_func)  # type: ignore
+[2025-08-28 18:13:12,000] [WARNING] [comm.py:152:init_deepspeed_backend] NCCL backend in DeepSpeed not yet implemented
+[2025-08-28 18:13:12,001] [INFO] [comm.py:616:init_distributed] cdb=None
+[2025-08-28 18:13:12,001] [INFO] [comm.py:643:init_distributed] Initializing TorchBackend in DeepSpeed with backend nccl
+Using the `WANDB_DISABLED` environment variable is deprecated and will be removed in v5. Use the --report_to flag to control the integrations used for logging result (for instance --report_to none).
+08/28/2025 18:13:12 - WARNING - __main__ - Process rank: 0, device: cuda:0, n_gpu: 1distributed training: True, 16-bits training: False
+08/28/2025 18:13:12 - WARNING - datasets.builder - Using custom data configuration default-25178e251dd03be0
+08/28/2025 18:13:12 - WARNING - datasets.builder - Reusing dataset uie_instructions (logs_and_outputs/debug/order_1/outputs/2-amazon/f236d5f0073f6b88182545d96de70db6/uie_instructions/default-25178e251dd03be0/2.0.0/c490e7f13dec80785fc335819009163a45c86ae2816040c8d81800108e7e4374)
+  0%|          | 0/3 [00:00<?, ?it/s]100%|██████████| 3/3 [00:00<00:00, 416.93it/s]
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/torch/nn/init.py:511: UserWarning: Initializing zero-element tensors is a no-op
+  warnings.warn("Initializing zero-element tensors is a no-op")
+-----Gradient checkpointing: False -----
+[93m [WARNING] [0m cpu_adam cuda is missing or is incompatible with installed torch, only cpu ops can be compiled!
+Using /home/yongxi/.cache/torch_extensions/py310_cu124 as PyTorch extensions root...
+Emitting ninja build file /home/yongxi/.cache/torch_extensions/py310_cu124/cpu_adam/build.ninja...
+Building extension module cpu_adam...
+Allowing ninja to set a default number of workers... (overridable by setting the environment variable MAX_JOBS=N)
+ninja: no work to do.
+Loading extension module cpu_adam...
+Time to load cpu_adam op: 9.095234870910645 seconds
+Rank: 0 partition count [1] and sizes[(2359440, False)] 
+[rank0]:[W828 18:14:10.041304805 ProcessGroupNCCL.cpp:4561] [PG ID 0 PG GUID 0 Rank 0]  using GPU 0 to perform barrier as devices used by this process are currently unknown. This can potentially cause a hang if this rank to GPU mapping is incorrect. Specify device_ids in barrier() to force use of a particular device, or call init_process_group() with a device_id.
+  0%|          | 0/3 [00:00<?, ?it/s]/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/transformers/tokenization_utils_base.py:3596: UserWarning: `as_target_tokenizer` is deprecated and will be removed in v5 of Transformers. You can tokenize your labels by using the argument `text_target` of the regular `__call__` method (either in the same call as your input texts if you use the same keyword arguments, or in a separate call.
+  warnings.warn(
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/torch/autograd/graph.py:823: UserWarning: c10d::broadcast_: an autograd kernel was not registered to the Autograd key(s) but we are trying to backprop through it. This may lead to silently incorrect behavior. This behavior is deprecated and will be removed in a future version of PyTorch. If your operator is differentiable, please ensure you have registered an autograd kernel to the correct Autograd key (e.g. DispatchKey::Autograd, DispatchKey::CompositeImplicitAutograd). If your operator is not differentiable, or to squash this warning and use the previous behavior, please register torch::CppFunction::makeFallthrough() to DispatchKey::Autograd. (Triggered internally at /pytorch/torch/csrc/autograd/autograd_not_implemented_fallback.cpp:62.)
+  return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/deepspeed/runtime/zero/stage_1_and_2.py:1830: UserWarning: The torch.cuda.*DtypeTensor constructors are no longer recommended. It's best to use methods such as torch.tensor(data, dtype=*, device='cuda') to create tensors. (Triggered internally at /pytorch/torch/csrc/tensor/python_tensor.cpp:78.)
+  overflow_gpu = get_accelerator().ByteTensor([overflow])
+ 33%|███▎      | 1/3 [04:34<09:09, 274.60s/it]/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/transformers/tokenization_utils_base.py:3596: UserWarning: `as_target_tokenizer` is deprecated and will be removed in v5 of Transformers. You can tokenize your labels by using the argument `text_target` of the regular `__call__` method (either in the same call as your input texts if you use the same keyword arguments, or in a separate call.
+  warnings.warn(
+ 67%|██████▋   | 2/3 [04:36<01:54, 114.39s/it]100%|██████████| 3/3 [04:39<00:00, 63.18s/it]                                              {'train_runtime': 279.1286, 'train_samples_per_second': 0.072, 'train_steps_per_second': 0.011, 'train_loss': 12.354166666666666, 'epoch': 1.0}
+100%|██████████| 3/3 [04:39<00:00, 63.18s/it]100%|██████████| 3/3 [04:39<00:00, 93.03s/it]
+***** train metrics *****
+  epoch                    =        1.0
+  train_loss               =    12.3542
+  train_runtime            = 0:04:39.12
+  train_samples            =         20
+  train_samples_per_second =      0.072
+  train_steps_per_second   =      0.011
+  0%|          | 0/1 [00:00<?, ?it/s]100%|██████████| 1/1 [00:00<00:00, 69.90it/s]
+***** predict metrics *****
+  epoch                          =        1.0
+  predict_exact_match            =        0.0
+  predict_exact_match_for_SC     =        0.0
+  predict_exact_match_for_amazon =        0.0
+  predict_gen_len                =        2.4
+  predict_global_step            =          3
+  predict_loss                   =      5.625
+  predict_rouge1                 =        0.0
+  predict_rouge1_for_SC          =        0.0
+  predict_rouge1_for_amazon      =        0.0
+  predict_rougeL                 =        0.0
+  predict_rougeL_for_SC          =        0.0
+  predict_rougeL_for_amazon      =        0.0
+  predict_runtime                = 0:00:00.43
+  predict_samples                =         10
+  predict_samples_per_second     =     23.032
+  predict_steps_per_second       =      2.303
+[rank0]:[W828 18:18:51.547749144 ProcessGroupNCCL.cpp:1496] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+[2025-08-28 18:18:53,099] [INFO] [launch.py:347:main] Process 1632326 exits successfully.
++ CUDA_VISIBLE_DEVICES=7
++ deepspeed --master_port 25775 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --model_name_or_path logs_and_outputs/debug/order_1/outputs/2-amazon/adapter --data_dir CL_Benchmark --task_config_dir configs/order1_configs/yahoo --instruction_file configs/instruction_config.json --instruction_strategy single --output_dir logs_and_outputs/debug/order_1/outputs/3-yahoo --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 1 --learning_rate 1e-03 --num_train_epochs 1 --deepspeed configs/ds_configs/stage2.config --run_name order1_round3_sdlora --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --evaluation_strategy no --save_strategy no --save_steps 1500 --lamda_1 0.5 --lamda_2 0 --peft_type SDLORA --max_train_samples 20 --max_eval_samples 10 --max_predict_samples 10
+[2025-08-28 18:18:56,222] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/deepspeed/runtime/zero/linear.py:49: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  def forward(ctx, input, weight, bias=None):
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/deepspeed/runtime/zero/linear.py:67: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  def backward(ctx, grad_output):
+[2025-08-28 18:18:57,278] [WARNING] [runner.py:196:fetch_hostfile] Unable to find hostfile, will proceed with training with local resources only.
+Detected CUDA_VISIBLE_DEVICES=7: setting --include=localhost:7
+[2025-08-28 18:18:57,358] [INFO] [runner.py:555:main] cmd = /home/yongxi/miniconda3/envs/sd-lora/bin/python3.10 -u -m deepspeed.launcher.launch --world_info=eyJsb2NhbGhvc3QiOiBbN119 --master_addr=127.0.0.1 --master_port=25775 --enable_each_rank_log=None src/run_uie_lora.py --do_train --do_predict --predict_with_generate --model_name_or_path logs_and_outputs/debug/order_1/outputs/2-amazon/adapter --data_dir CL_Benchmark --task_config_dir configs/order1_configs/yahoo --instruction_file configs/instruction_config.json --instruction_strategy single --output_dir logs_and_outputs/debug/order_1/outputs/3-yahoo --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 1 --learning_rate 1e-03 --num_train_epochs 1 --deepspeed configs/ds_configs/stage2.config --run_name order1_round3_sdlora --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --evaluation_strategy no --save_strategy no --save_steps 1500 --lamda_1 0.5 --lamda_2 0 --peft_type SDLORA --max_train_samples 20 --max_eval_samples 10 --max_predict_samples 10
+[2025-08-28 18:18:58,489] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/deepspeed/runtime/zero/linear.py:49: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  def forward(ctx, input, weight, bias=None):
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/deepspeed/runtime/zero/linear.py:67: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  def backward(ctx, grad_output):
+[2025-08-28 18:18:59,829] [INFO] [launch.py:145:main] WORLD INFO DICT: {'localhost': [7]}
+[2025-08-28 18:18:59,829] [INFO] [launch.py:151:main] nnodes=1, num_local_procs=1, node_rank=0
+[2025-08-28 18:18:59,829] [INFO] [launch.py:162:main] global_rank_mapping=defaultdict(<class 'list'>, {'localhost': [0]})
+[2025-08-28 18:18:59,829] [INFO] [launch.py:163:main] dist_world_size=1
+[2025-08-28 18:18:59,829] [INFO] [launch.py:165:main] Setting CUDA_VISIBLE_DEVICES=7
+[2025-08-28 18:19:02,020] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/deepspeed/runtime/zero/linear.py:49: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  def forward(ctx, input, weight, bias=None):
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/deepspeed/runtime/zero/linear.py:67: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  def backward(ctx, grad_output):
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/fairscale/experimental/nn/offload.py:19: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  return torch.cuda.amp.custom_fwd(orig_func)  # type: ignore
+/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/fairscale/experimental/nn/offload.py:30: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  return torch.cuda.amp.custom_bwd(orig_func)  # type: ignore
+[2025-08-28 18:19:07,039] [INFO] [launch.py:315:sigkill_handler] Killing subprocess 1635397
+Traceback (most recent call last):
+  File "/home/yongxi/work/O-LoRA/src/run_uie_lora.py", line 617, in <module>
+    debugpy.wait_for_client()
+  File "/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/debugpy/public_api.py", line 47, in wrapper
+    return wrapped(*args, **kwargs)
+  File "/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/debugpy/server/api.py", line 312, in __call__
+    pydevd._wait_for_attach(cancel=cancel_event)
+  File "/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/debugpy/_vendored/pydevd/pydevd.py", line 2917, in _wait_for_attach
+    py_db.block_until_configuration_done(cancel=cancel)
+  File "/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/debugpy/_vendored/pydevd/pydevd.py", line 945, in block_until_configuration_done
+    self._py_db_command_thread_event.wait(TIMEOUT_FAST)
+  File "/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/threading.py", line 607, in wait
+    signaled = self._cond.wait(timeout)
+  File "/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/threading.py", line 324, in wait
+    gotit = waiter.acquire(True, timeout)
+KeyboardInterrupt
+[2025-08-28 18:19:07,117] [INFO] [launch.py:324:sigkill_handler] Main process received SIGINT, exiting
+Traceback (most recent call last):
+  File "/home/yongxi/miniconda3/envs/sd-lora/bin/deepspeed", line 6, in <module>
+    main()
+  File "/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/site-packages/deepspeed/launcher/runner.py", line 570, in main
+    result.wait()
+  File "/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/subprocess.py", line 1209, in wait
+    return self._wait(timeout=timeout)
+  File "/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/subprocess.py", line 1959, in _wait
+    (pid, sts) = self._try_wait(0)
+  File "/home/yongxi/miniconda3/envs/sd-lora/lib/python3.10/subprocess.py", line 1917, in _try_wait
+    (pid, sts) = os.waitpid(self.pid, wait_flags)
+KeyboardInterrupt

@@ -299,23 +299,22 @@ class SDLoraModel(torch.nn.Module):
 
     def consolidate_lora_directions(self):
         """
-        Consolidate current task's LoRA directions into the historical directions using separate storage.
-        Each historical direction is stored separately with its own trainable scaling.
+        Consolidate current task's LoRA directions into the historical directions.
         """
         for module in self.model.modules():
             if isinstance(module, LoraLayer):
                 adapter_name = module.active_adapter
                 if adapter_name in module.loranew_A and adapter_name in module.lora_A:
-                    # Get current task's LoRA directions
-                    current_A = module.loranew_A[adapter_name].weight.data  # [r, in_features]
-                    current_B = module.loranew_B[adapter_name].weight.data  # [out_features, r]
+                    current_A = module.loranew_A[adapter_name].weight.detach().clone()
+                    current_B = module.loranew_B[adapter_name].weight.detach().clone()
                     
                     # Add current directions as a new historical direction
                     module.add_historical_direction(adapter_name, current_A, current_B)
                     
                     # Reset current task's LoRA for next task
-                    module.loranew_A[adapter_name].weight.data.zero_()
-                    module.loranew_B[adapter_name].weight.data.zero_()
+                    with torch.no_grad():
+                        module.loranew_A[adapter_name].weight.zero_()
+                        module.loranew_B[adapter_name].weight.zero_()
 
 
 def mark_only_lora_as_trainable(model: nn.Module, bias: str = "none") -> None:
@@ -348,14 +347,15 @@ class LoraLayer:
         # 历史方向存储：每个方向分开保存
         self.historical_directions = nn.ModuleDict({})  # 存储历史A和B矩阵
         self.historical_scalings = nn.ParameterDict({})  # 存储每个历史方向的可训练scaling
-        self.num_historical_directions = {}  # 记录每个adapter的历史方向数量
+        # 使用 ParameterDict 来保存历史方向数量，这样可以被torch保存和加载
+        self.num_historical_directions = nn.ParameterDict({})  # 记录每个adapter的历史方向数量
         # Embedding相关参数
         self.lora_embedding_A = nn.ParameterDict({})
         self.lora_embedding_B = nn.ParameterDict({})
         self.loranew_embedding_A = nn.ParameterDict({})
         self.loranew_embedding_B = nn.ParameterDict({})
-        self.historical_embedding_directions = nn.ModuleDict({})
-        self.historical_embedding_scalings = nn.ParameterDict({})
+        # self.historical_embedding_directions = nn.ModuleDict({})
+        # self.historical_embedding_scalings = nn.ParameterDict({})
         # 兼容性参数（为了向后兼容现有代码）
         self.lora_A = nn.ModuleDict({})
         self.lora_B = nn.ModuleDict({})
@@ -379,7 +379,7 @@ class LoraLayer:
             self.loranew_B.update(nn.ModuleDict({adapter_name: nn.Linear(r, self.out_features, bias=False)}))
             
             # 初始化历史方向存储
-            self.num_historical_directions[adapter_name] = 0
+            self.num_historical_directions[adapter_name] = nn.Parameter(torch.tensor(0, dtype=torch.long), requires_grad=False)
             self.historical_directions.update(nn.ModuleDict({adapter_name: nn.ModuleDict({})}))
             self.historical_scalings.update(nn.ParameterDict({adapter_name: nn.ParameterDict({})}))
             
@@ -410,9 +410,9 @@ class LoraLayer:
         if adapter_name not in self.historical_directions:
             self.historical_directions.update(nn.ModuleDict({adapter_name: nn.ModuleDict({})}))
             self.historical_scalings.update(nn.ParameterDict({adapter_name: nn.ParameterDict({})}))
-            self.num_historical_directions[adapter_name] = 0
+            self.num_historical_directions[adapter_name] = nn.Parameter(torch.tensor(0, dtype=torch.long), requires_grad=False)
         
-        direction_idx = self.num_historical_directions[adapter_name]
+        direction_idx = self.num_historical_directions[adapter_name].item()
         direction_name = f"dir_{direction_idx}"
         
         # 创建新的方向模块
@@ -436,7 +436,8 @@ class LoraLayer:
         scaling_param = nn.Parameter(torch.tensor(initial_scaling, dtype=direction_A.dtype, device=direction_A.device))
         self.historical_scalings[adapter_name].update(nn.ParameterDict({direction_name: scaling_param}))
         
-        self.num_historical_directions[adapter_name] += 1
+        # 更新历史方向数量
+        self.num_historical_directions[adapter_name].data = torch.tensor(direction_idx + 1, dtype=torch.long, device=direction_A.device)
 
     def update_layer_embedding(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         self.r[adapter_name] = r
@@ -546,26 +547,43 @@ class Linear(nn.Linear, LoraLayer):
         if not self.merged:
             # compute in LoRA dtype
             ref_dtype = (
-                self.lora_A[self.active_adapter].weight.dtype if has_prev else self.loranew_A[self.active_adapter].weight.dtype
+                self.loranew_A[self.active_adapter].weight.dtype
             )
             x_lora = x.to(ref_dtype)
             x_lora = self.lora_dropout[self.active_adapter](x_lora)
 
             # Historical LoRA directions: sum over previous tasks with individual trainable scalings
             # This implements the sum: α_1 A_1 B_1 + α_2 A_2 B_2 + ... + α_{t-1} A_{t-1} B_{t-1}
-            if self.num_historical_directions[self.active_adapter] > 0:
-                for i in range(self.num_historical_directions):
-                    direction_key = f"direction_{i}"
-                    scaling_key = f"{self.active_adapter}_{direction_key}"
+            if self.active_adapter in self.num_historical_directions and self.num_historical_directions[self.active_adapter].item() > 0:
+                for i in range(self.num_historical_directions[self.active_adapter].item()):
+                    direction_key = f"dir_{i}"
                     
-                    if direction_key in self.historical_directions and scaling_key in self.historical_scalings:
-                        # Get the historical direction components
-                        historical_A = self.historical_directions[direction_key].lora_A
-                        historical_B = self.historical_directions[direction_key].lora_B
+                    if (self.active_adapter in self.historical_directions and 
+                        direction_key in self.historical_directions[self.active_adapter] and
+                        self.active_adapter in self.historical_scalings and
+                        direction_key in self.historical_scalings[self.active_adapter]):
                         
+                        # Get the historical direction components
+                        
+
+                         # 确保历史适配器层与输入数据类型一致
+                        target_device = x_lora.device
+                        target_dtype = x_lora.dtype
+                        
+                        historical_A = self.historical_directions[self.active_adapter][direction_key]['A']
+                        historical_B = self.historical_directions[self.active_adapter][direction_key]['B']
+                        
+                        historical_A = historical_A.to(device=target_device, dtype=target_dtype)
+                        historical_B = historical_B.to(device=target_device, dtype=target_dtype)
                         # Apply the direction with its individual trainable scaling
+                        # print('-'*40)
+                        # print(f"historical_A:{historical_A.weight.device}  {historical_A.weight.dtype}")
+                        # print(f"historical_B:{historical_B.weight.device}  {historical_B.weight.dtype}")
+                        # print(f"x_lora:{x_lora.device}  {x_lora.dtype}")
+                        # print('='*40)
+
                         historical_output = historical_B(historical_A(x_lora))
-                        result = result + historical_output * self.historical_scalings[scaling_key]
+                        result = result + historical_output * self.historical_scalings[self.active_adapter][direction_key]
 
             # Current task LoRA: α_t A_t B_t  
             # This implements the current task term from equation (4)
@@ -652,74 +670,74 @@ class Embedding(nn.Embedding, LoraLayer):
             return nn.Embedding.forward(self, x)
 
 
-if is_bnb_available():
+# if is_bnb_available():
 
-    class Linear8bitLt(bnb.nn.Linear8bitLt, LoraLayer):
-        def __init__(
-            self,
-            adapter_name,
-            in_features,
-            out_features,
-            r: int = 0,
-            lora_alpha: int = 1,
-            lora_dropout: float = 0.0,
-            **kwargs,
-        ):
-            bnb.nn.Linear8bitLt.__init__(
-                self,
-                in_features,
-                out_features,
-                bias=kwargs.get("bias", True),
-                has_fp16_weights=kwargs.get("has_fp16_weights", True),
-                memory_efficient_backward=kwargs.get("memory_efficient_backward", False),
-                threshold=kwargs.get("threshold", 0.0),
-                index=kwargs.get("index", None),
-            )
-            LoraLayer.__init__(self, in_features=in_features, out_features=out_features)
-            self.weight.requires_grad = False
-            init_lora_weights = kwargs.pop("init_lora_weights", True)
-            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, r_sum=0)
-            self.active_adapter = adapter_name
+#     class Linear8bitLt(bnb.nn.Linear8bitLt, LoraLayer):
+#         def __init__(
+#             self,
+#             adapter_name,
+#             in_features,
+#             out_features,
+#             r: int = 0,
+#             lora_alpha: int = 1,
+#             lora_dropout: float = 0.0,
+#             **kwargs,
+#         ):
+#             bnb.nn.Linear8bitLt.__init__(
+#                 self,
+#                 in_features,
+#                 out_features,
+#                 bias=kwargs.get("bias", True),
+#                 has_fp16_weights=kwargs.get("has_fp16_weights", True),
+#                 memory_efficient_backward=kwargs.get("memory_efficient_backward", False),
+#                 threshold=kwargs.get("threshold", 0.0),
+#                 index=kwargs.get("index", None),
+#             )
+#             LoraLayer.__init__(self, in_features=in_features, out_features=out_features)
+#             self.weight.requires_grad = False
+#             init_lora_weights = kwargs.pop("init_lora_weights", True)
+#             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, r_sum=0)
+#             self.active_adapter = adapter_name
 
-        def forward(self, x: torch.Tensor):
-            result = super().forward(x)
-            has_prev = self.active_adapter in self.lora_A.keys()
-            has_new = self.active_adapter in self.loranew_A.keys()
-            if self.disable_adapters or (not has_prev and not has_new):
-                return result
-            elif self.r.get(self.active_adapter, 0) > 0 or has_prev:
-                if not torch.is_autocast_enabled():
-                    expected_dtype = result.dtype
-                    if x.dtype != torch.float32:
-                        x = x.float()
-                    output = 0
-                    if has_prev and self.lora_A[self.active_adapter].weight.shape[0] > 0:
-                        output = (
-                            self.lora_B[self.active_adapter](
-                                self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
-                            ).to(expected_dtype)
-                            * self.scaling[self.active_adapter]
-                        )
-                    else:
-                        output = torch.zeros_like(result)
-                else:
-                    output = 0
-                    if has_prev and self.lora_A[self.active_adapter].weight.shape[0] > 0:
-                        output = (
-                            self.lora_B[self.active_adapter](
-                                self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
-                            )
-                            * self.scaling[self.active_adapter]
-                        )
-                    else:
-                        output = torch.zeros_like(result)
-                # add trainable new branch if exists
-                if has_new and self.r.get(self.active_adapter, 0) > 0:
-                    output = output + (
-                        self.loranew_B[self.active_adapter](
-                            self.loranew_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
-                        )
-                        * self.scaling[self.active_adapter]
-                    )
-                result += output
-            return result
+#         def forward(self, x: torch.Tensor):
+#             result = super().forward(x)
+#             has_prev = self.active_adapter in self.lora_A.keys()
+#             has_new = self.active_adapter in self.loranew_A.keys()
+#             if self.disable_adapters or (not has_prev and not has_new):
+#                 return result
+#             elif self.r.get(self.active_adapter, 0) > 0 or has_prev:
+#                 if not torch.is_autocast_enabled():
+#                     expected_dtype = result.dtype
+#                     if x.dtype != torch.float32:
+#                         x = x.float()
+#                     output = 0
+#                     if has_prev and self.lora_A[self.active_adapter].weight.shape[0] > 0:
+#                         output = (
+#                             self.lora_B[self.active_adapter](
+#                                 self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
+#                             ).to(expected_dtype)
+#                             * self.scaling[self.active_adapter]
+#                         )
+#                     else:
+#                         output = torch.zeros_like(result)
+#                 else:
+#                     output = 0
+#                     if has_prev and self.lora_A[self.active_adapter].weight.shape[0] > 0:
+#                         output = (
+#                             self.lora_B[self.active_adapter](
+#                                 self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
+#                             )
+#                             * self.scaling[self.active_adapter]
+#                         )
+#                     else:
+#                         output = torch.zeros_like(result)
+#                 # add trainable new branch if exists
+#                 if has_new and self.r.get(self.active_adapter, 0) > 0:
+#                     output = output + (
+#                         self.loranew_B[self.active_adapter](
+#                             self.loranew_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
+#                         )
+#                         * self.scaling[self.active_adapter]
+#                     )
+#                 result += output
+#             return result

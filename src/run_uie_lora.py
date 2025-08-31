@@ -439,6 +439,8 @@ def main():
         # this module should always be frozen because we change the vocabulary
         elif name.find("shared") != -1:
             param.requires_grad = False
+        elif name.find("historical_directions") != -1:
+            param.requires_grad = False
 
     if (
             hasattr(model.config, "max_position_embeddings")

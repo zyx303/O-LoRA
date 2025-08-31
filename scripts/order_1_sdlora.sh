@@ -8,7 +8,7 @@ port=$(shuf -i25000-30000 -n1)
  
 # bash scripts/order_1_sdlora.sh > logs_and_outputs/sdlora/order_1/logs/train_and_infer_sdlora.log 2>&1 &
 
-CUDA_VISIBLE_DEVICES=6,7 deepspeed --master_port $port src/run_uie_lora.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
    --do_predict \
    --predict_with_generate \
@@ -45,7 +45,7 @@ CUDA_VISIBLE_DEVICES=6,7 deepspeed --master_port $port src/run_uie_lora.py \
 
 sleep 5
 
-CUDA_VISIBLE_DEVICES=6,7 deepspeed --master_port $port src/run_uie_lora.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
    --do_predict \
    --predict_with_generate \
@@ -82,7 +82,7 @@ CUDA_VISIBLE_DEVICES=6,7 deepspeed --master_port $port src/run_uie_lora.py \
 
 sleep 5
 
-CUDA_VISIBLE_DEVICES=6,7 deepspeed --master_port $port src/run_uie_lora.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
    --do_predict \
    --predict_with_generate \
@@ -119,7 +119,7 @@ CUDA_VISIBLE_DEVICES=6,7 deepspeed --master_port $port src/run_uie_lora.py \
 
 sleep 5
 
-CUDA_VISIBLE_DEVICES=6,7 deepspeed --master_port $port src/run_uie_lora.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
    --do_predict \
    --predict_with_generate \

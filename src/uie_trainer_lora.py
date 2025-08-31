@@ -89,6 +89,8 @@ class UIETrainer(Seq2SeqTrainer):
 
         ########################### Regularization ##########################
         orthogonal_loss = 0.
+        # 关闭ortho
+        # orthogonal_loss = torch.tensor(0.).to(self.args.device)
         for name, param in self.model.named_parameters():
             if "lora_A" in name:
                 for name_, param_ in self.model.named_parameters():
@@ -105,6 +107,7 @@ class UIETrainer(Seq2SeqTrainer):
         lamda_1 = self.args.lamda_1
         lamda_2 = self.args.lamda_2
 
+        # print(f"orthogonal_loss: {orthogonal_loss.item()}; l2_loss: {l2_loss.item()}; accuracy_loss: {loss.item()}; λ1: {lamda_1}; λ2: {lamda_2}")
         logger.info(f"orthogonal_loss: {orthogonal_loss.item()}; l2_loss: {l2_loss.item()}; accuracy_loss: {loss.item()}; λ1: {lamda_1}; λ2: {lamda_2}")
         loss = loss + orthogonal_loss * lamda_1 + l2_loss * lamda_2
         ######################################################################

@@ -2,8 +2,7 @@
 set -x
 
 export CUDA_DEVICE_ORDER="PCI_BUS_ID"
-export TRANSFORMERS_CACHE=/root/.cache/huggingface
-
+export TRANSFORMERS_CACHE=/data/yongxi/.cache/huggingface
 port=$(shuf -i25000-30000 -n1)
  
 # bash scripts_llama/order_1.sh> logs_and_outputs_llama/order_1/logs/train_and_infer.log 2>&1 &

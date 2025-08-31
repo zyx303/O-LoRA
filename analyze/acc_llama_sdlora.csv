@@ -1,0 +1,9 @@
+Order,Stage,agnews,amazon,dbpedia,overall,yahoo
+order_1,after_task_1,,,98.6974,98.6974,
+order_1,after_task_2,,61.4868,98.2632,79.875,
+order_1,after_task_3,,58.25,95.8816,73.3158,65.8158
+order_1,after_task_4,87.4211,59.8553,97.1316,77.4539,65.4079
+order_2,after_task_1,,,98.7763,98.7763,
+order_2,after_task_2,,61.75,98.4474,80.0987,
+order_2,after_task_3,87.3421,62.4079,98.6711,82.807,
+order_2,after_task_4,87.1316,60.8421,98.1447,79.1349,70.4211
