@@ -1094,7 +1094,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 elif peft_config.num_transformer_submodules == 2:
                     prefix_labels = torch.full((batch_size, peft_config.num_virtual_tokens), -100).to(self.device)
                     kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
-            prompts = self.get_prompt(batch_size=batch_size)
+            prompts = self.get_prompt(batch_size=batch_size)# (batch_size, num_virtual_tokens, token_dim)
             prompts = prompts.to(inputs_embeds.dtype)
             inputs_embeds = torch.cat((prompts[:, : peft_config.num_virtual_tokens], inputs_embeds), dim=1)
             if peft_config.num_transformer_submodules == 1:

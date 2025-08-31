@@ -25,7 +25,6 @@ import json
 import time
 from dataclasses import dataclass, field
 from typing import Optional
-
 import datasets
 import nltk  # Here to have a nice missing dependency error message early on
 import numpy as np
@@ -46,6 +45,8 @@ from transformers.file_utils import is_offline_mode
 from transformers.trainer_utils import get_last_checkpoint
 from peft import get_peft_config, get_peft_model, LoraConfig, TaskType, PeftModel, PeftConfig  # add
 from peft import SDLoraConfig  # new
+from peft import L2PConfig  # new
+from peft import PeftType  # new
 
 from uie_collator import DataCollatorForUIE
 from uie_dataset_lora import gen_cache_path
@@ -413,6 +414,12 @@ def main():
                 lora_alpha=32,
                 lora_dropout=0.1,
                 save_loranew=True,
+            )
+        elif model_args.peft_type.upper() == "L2P":
+            peft_config = L2PConfig(
+                num_virtual_tokens=5,
+                task_type=TaskType.SEQ_2_SEQ_LM,
+                inference_mode=False
             )
         else:
             peft_config = LoraConfig(
