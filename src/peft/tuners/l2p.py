@@ -143,18 +143,16 @@ class L2PPromptPool(torch.nn.Module):
         self.pull_constraint = config.pull_constraint
         self.pull_constraint_coeff = config.pull_constraint_coeff
 
-        # Initialize prompt pool
-        if config.prompt_init == L2PInit.UNIFORM:
-            val = math.sqrt(6.0 / float(3 * self.token_dim + self.pool_size))
-            self.prompt = torch.nn.Parameter(
-                torch.zeros(self.pool_size, self.num_virtual_tokens, self.token_dim)
-            )
-            torch.nn.init.uniform_(self.prompt.data, -val, val)
-        else:  # RANDOM
+        # Initialize prompt pool (align with prompt.Prompt: uniform init over [0,1] by default)
+        if str(config.prompt_init).upper().endswith("UNIFORM"):
             self.prompt = torch.nn.Parameter(
                 torch.randn(self.pool_size, self.num_virtual_tokens, self.token_dim)
             )
-            torch.nn.init.xavier_uniform_(self.prompt.data)
+            torch.nn.init.uniform_(self.prompt, -1, 1)
+        else:  # zero/random fallback similar to original variants
+            self.prompt = torch.nn.Parameter(
+                torch.zeros(self.pool_size, self.num_virtual_tokens, self.token_dim)
+            )
 
         # Initialize prompt keys for selection
         if config.prompt_key_init == "uniform":
@@ -209,7 +207,6 @@ class L2PPromptPool(torch.nn.Module):
         
         # Select top-k prompts based on similarity
         if self.top_k == -1:
-            # Use all prompts
             top_k = self.pool_size
         else:
             top_k = min(self.top_k, self.pool_size)
@@ -217,51 +214,28 @@ class L2PPromptPool(torch.nn.Module):
         if prompt_mask is not None:
             similarity = similarity * prompt_mask
             
-        # Get top-k indices and similarities
-        top_similarities, top_indices = torch.topk(similarity, top_k, dim=1)  # (batch_size, top_k)
-        
-        # Compute selection weights using softmax
-        selection_weights = F.softmax(top_similarities, dim=1)  # (batch_size, top_k)
-        
-        # Select and weight prompts
-        batch_selected_prompts = []
-        for i in range(batch_size):
-            selected_prompt_indices = top_indices[i]  # (top_k,)
-            selected_prompts = self.prompt[selected_prompt_indices]  # (top_k, num_virtual_tokens, token_dim)
-            weights = selection_weights[i].unsqueeze(-1).unsqueeze(-1)  # (top_k, 1, 1)
-            weighted_prompts = selected_prompts * weights  # (top_k, num_virtual_tokens, token_dim)
-            # Sum weighted prompts
-            final_prompt = torch.sum(weighted_prompts, dim=0)  # (num_virtual_tokens, token_dim)
-            batch_selected_prompts.append(final_prompt)
-        
-        selected_prompts = torch.stack(batch_selected_prompts, dim=0)  # (batch_size, num_virtual_tokens, token_dim)
-        
-        # Compute losses for training
-        reduce_sim = 0.0
-        if train:
-            # Similarity reduction loss to encourage diversity
-            if self.sim_coefficient > 0:
-                # Compute pairwise similarities between selected prompts
-                selected_prompt_keys = prompt_key_norm[top_indices.view(-1)]  # (batch_size * top_k, hidden_size)
-                selected_prompt_keys = selected_prompt_keys.view(batch_size, top_k, -1)  # (batch_size, top_k, hidden_size)
-                
-                # Compute pairwise cosine similarities within each batch
-                for i in range(batch_size):
-                    keys = selected_prompt_keys[i]  # (top_k, hidden_size)
-                    pairwise_sim = torch.matmul(keys, keys.t())  # (top_k, top_k)
-                    # Exclude diagonal (self-similarity)
-                    mask = torch.eye(top_k, device=pairwise_sim.device).bool()
-                    pairwise_sim = pairwise_sim.masked_fill(mask, 0)
-                    reduce_sim += torch.sum(torch.abs(pairwise_sim))
-                
-                reduce_sim = reduce_sim * self.sim_coefficient / batch_size
-        
+        # Get top-k indices
+        _, top_indices = torch.topk(similarity, top_k, dim=1)  # (batch_size, top_k)
+
+        # Gather prompts: (B, top_k, V, C) -> (B, top_k*V, C)
+        batched_prompt_raw = self.prompt[top_indices]  # (B, top_k, num_virtual_tokens, token_dim)
+        bsz, k, V, C = batched_prompt_raw.shape
+        selected_prompts = batched_prompt_raw.reshape(bsz, k * V, C)
+
+        # Compute reduce_sim consistent with prompt.py Prompt
+        batched_key_norm = prompt_key_norm[top_indices]  # (B, top_k, C)
+        x_embed_norm = query_norm  # (B, C)
+        sim = batched_key_norm * x_embed_norm.unsqueeze(1)  # (B, top_k, C)
+        reduce_sim = torch.sum(sim) / batch_size
+
         return {
-            "selected_prompts": selected_prompts,
+            "selected_prompts": selected_prompts,  # (B, top_k * num_virtual_tokens, C)
             "reduce_sim": reduce_sim,
             "similarities": similarity,
             "top_indices": top_indices,
-            "selection_weights": selection_weights,
+            "selected_key": batched_key_norm,
+            "prompt_key_norm": prompt_key_norm,
+            "x_embed_norm": x_embed_norm,
         }
 
     def get_prompt_params(self):

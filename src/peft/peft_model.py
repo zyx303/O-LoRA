@@ -213,6 +213,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             prompt_encoder = PromptEncoder(config)
         elif config.peft_type == PeftType.PREFIX_TUNING:
             prompt_encoder = PrefixEncoder(config)
+        elif config.peft_type == PeftType.L2P:
+            # Initialize L2P prompt pool as the prompt encoder for dynamic prompt selection
+            prompt_encoder = L2PPromptPool(config)
         else:
             raise ValueError("Not supported")
         self.prompt_encoder.update(torch.nn.ModuleDict({adapter_name: prompt_encoder}))
@@ -531,8 +534,8 @@ class PeftModelForSequenceClassification(PeftModel):
             )
 
         batch_size = input_ids.shape[0]
-        if attention_mask is not None:
-            # concat prompt attention mask
+        if attention_mask is not None and peft_config.peft_type != PeftType.L2P:
+            # concat prompt attention mask for static prompt types
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(self.device)
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
         if kwargs.get("position_ids", None) is not None:
@@ -550,6 +553,18 @@ class PeftModelForSequenceClassification(PeftModel):
 
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
             return self._prefix_tuning_forward(input_ids=input_ids, **kwargs)
+        elif peft_config.peft_type == PeftType.L2P:
+            return self._l2p_forward(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                inputs_embeds=inputs_embeds,
+                labels=labels,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+                task_id=kwargs.pop("task_id", None),
+                **kwargs,
+            )
         else:
             if kwargs.get("token_type_ids", None) is not None:
                 kwargs["token_type_ids"] = torch.cat(
@@ -682,7 +697,7 @@ class PeftModelForSequenceClassification(PeftModel):
             train=self.training,
         )
         
-        selected_prompts = prompt_results["selected_prompts"]  # (batch_size, num_virtual_tokens, token_dim)
+        selected_prompts = prompt_results["selected_prompts"]  # (batch_size, top_k * num_virtual_tokens, token_dim)
         
         # Concatenate prompts with input embeddings
         inputs_embeds_with_prompts = torch.cat((selected_prompts, inputs_embeds), dim=1)
@@ -808,8 +823,8 @@ class PeftModelForCausalLM(PeftModel):
             )
 
         batch_size = input_ids.shape[0]
-        if attention_mask is not None:
-            # concat prompt attention mask
+        if attention_mask is not None and peft_config.peft_type != PeftType.L2P:
+            # concat prompt attention mask for static prompt types
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(self.device)
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
 
@@ -832,6 +847,36 @@ class PeftModelForCausalLM(PeftModel):
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
             past_key_values = self.get_prompt(batch_size)
             return self.base_model(input_ids=input_ids, past_key_values=past_key_values, **kwargs)
+        elif peft_config.peft_type == PeftType.L2P:
+            # Dynamic prompt selection with L2P for CausalLM
+            if inputs_embeds is None:
+                inputs_embeds = self.word_embeddings(input_ids)
+
+            # Select prompts using mean-pooled features by default
+            prompt_pool = self.prompt_encoder[self.active_adapter]
+            prompt_results = prompt_pool(
+                x_embed=inputs_embeds,
+                cls_features=None,
+                task_id=kwargs.pop("task_id", None),
+                train=self.training,
+            )
+            selected_prompts = prompt_results["selected_prompts"]  # (B, V, C)
+
+            # Concat attention mask and labels to account for prompts
+            if attention_mask is not None:
+                prefix_attention_mask = torch.ones(
+                    inputs_embeds.shape[0], selected_prompts.shape[1], device=attention_mask.device
+                )
+                kwargs["attention_mask"] = torch.cat((prefix_attention_mask, attention_mask), dim=1)
+
+            if labels is not None:
+                prefix_labels = torch.full(
+                    (inputs_embeds.shape[0], selected_prompts.shape[1]), -100, device=labels.device
+                )
+                kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
+
+            inputs_embeds = torch.cat((selected_prompts.to(inputs_embeds.dtype), inputs_embeds), dim=1)
+            return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
@@ -1227,6 +1272,29 @@ class PeftModelForTokenClassification(PeftModel):
 
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
             return self._prefix_tuning_forward(input_ids=input_ids, **kwargs)
+        elif peft_config.peft_type == PeftType.L2P:
+            # Dynamic prompt selection for token classification
+            if inputs_embeds is None:
+                inputs_embeds = self.word_embeddings(input_ids)
+
+            prompt_pool = self.prompt_encoder[self.active_adapter]
+            prompt_results = prompt_pool(
+                x_embed=inputs_embeds,
+                cls_features=None,
+                task_id=kwargs.pop("task_id", None),
+                train=self.training,
+            )
+            selected_prompts = prompt_results["selected_prompts"]  # (B, V, C)
+
+            # Update attention mask if provided
+            if attention_mask is not None:
+                prefix_attention_mask = torch.ones(
+                    inputs_embeds.shape[0], selected_prompts.shape[1], device=attention_mask.device
+                )
+                kwargs["attention_mask"] = torch.cat((prefix_attention_mask, attention_mask), dim=1)
+
+            inputs_embeds = torch.cat((selected_prompts.to(inputs_embeds.dtype), inputs_embeds), dim=1)
+            return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
         else:
             if kwargs.get("token_type_ids", None) is not None:
                 kwargs["token_type_ids"] = torch.cat(
