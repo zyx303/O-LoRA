@@ -246,7 +246,8 @@ class UIETrainingArguments(Seq2SeqTrainingArguments):
     lamda_1: float = field(default = 0.5)
     lamda_2: float = field(default = 0)
     regularization: bool = field(default=True)
-
+    # #l2p
+    pool_size: int = field(default=50)
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -418,7 +419,7 @@ def main():
             )
         elif model_args.peft_type.upper() == "L2P":
             peft_config = L2PConfig(
-                num_virtual_tokens=5,
+                num_virtual_tokens=20,
                 task_type=TaskType.SEQ_2_SEQ_LM,
                 inference_mode=False
             )

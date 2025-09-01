@@ -652,109 +652,89 @@ class PeftModelForSequenceClassification(PeftModel):
                 attentions=outputs.attentions,
             )
 
-    def _l2p_forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        inputs_embeds=None,
-        labels=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-        task_id=None,
-        **kwargs,
-    ):
-        """
-        Forward pass for L2P (Learning to Prompt) method.
-        """
-        batch_size = input_ids.shape[0]
-        
-        # Get input embeddings
-        if inputs_embeds is None:
-            inputs_embeds = self.word_embeddings(input_ids)
-        
-        # Get CLS token features for prompt selection
-        # Forward through the model to get hidden states
-        outputs = self.base_model(
-            inputs_embeds=inputs_embeds,
-            attention_mask=attention_mask,
-            output_hidden_states=True,
-            output_attentions=output_attentions,
-            return_dict=True,
-        )
-        
-        # Extract CLS token features (first token)
-        cls_features = outputs.hidden_states[-1][:, 0, :]  # (batch_size, hidden_size)
-        
-        # Get L2P prompt pool
-        prompt_pool = self.prompt_encoder[self.active_adapter]
-        
-        # Select prompts based on input features
-        prompt_results = prompt_pool(
-            x_embed=inputs_embeds,
-            cls_features=cls_features,
-            task_id=task_id,
-            train=self.training,
-        )
-        
-        selected_prompts = prompt_results["selected_prompts"]  # (batch_size, top_k * num_virtual_tokens, token_dim)
-        
-        # Concatenate prompts with input embeddings
-        inputs_embeds_with_prompts = torch.cat((selected_prompts, inputs_embeds), dim=1)
-        
-        # Update attention mask if provided
-        if attention_mask is not None:
-            prompt_attention_mask = torch.ones(
-                batch_size, selected_prompts.shape[1], device=attention_mask.device, dtype=attention_mask.dtype
-            )
-            attention_mask = torch.cat((prompt_attention_mask, attention_mask), dim=1)
-        
-        # Forward through the model with prompts
-        outputs = self.base_model(
-            inputs_embeds=inputs_embeds_with_prompts,
-            attention_mask=attention_mask,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-        
-        # Add L2P specific losses if training
-        if self.training and prompt_results.get("reduce_sim", 0) != 0:
-            if hasattr(outputs, "loss") and outputs.loss is not None:
-                outputs.loss = outputs.loss - prompt_results["reduce_sim"]
-            elif labels is not None:
-                # Compute classification loss
-                logits = outputs.logits
-                if self.config.problem_type is None:
-                    if self.base_model.num_labels == 1:
-                        self.config.problem_type = "regression"
-                    elif self.base_model.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
-                        self.config.problem_type = "single_label_classification"
-                    else:
-                        self.config.problem_type = "multi_label_classification"
+    # def _l2p_forward(
+    #     self,
+    #     input_ids=None,
+    #     attention_mask=None,
+    #     inputs_embeds=None,
+    #     labels=None,
+    #     output_attentions=None,
+    #     output_hidden_states=None,
+    #     return_dict=None,
+    #     task_id=None,
+    #     **kwargs,
+    # ):
+    #     """
+    #     Forward pass for L2P (Learning to Prompt) method.
+    #     """
+    #     batch_size = input_ids.shape[0]
 
-                if self.config.problem_type == "regression":
-                    loss_fct = MSELoss()
-                    if self.base_model.num_labels == 1:
-                        loss = loss_fct(logits.squeeze(), labels.squeeze())
-                    else:
-                        loss = loss_fct(logits, labels)
-                elif self.config.problem_type == "single_label_classification":
-                    loss_fct = CrossEntropyLoss()
-                    loss = loss_fct(logits.view(-1, self.base_model.num_labels), labels.view(-1))
-                elif self.config.problem_type == "multi_label_classification":
-                    loss_fct = BCEWithLogitsLoss()
-                    loss = loss_fct(logits, labels)
-                
-                # Subtract similarity reduction loss (encourage diversity)
-                loss = loss - prompt_results["reduce_sim"]
-                
-                if return_dict:
-                    outputs.loss = loss
-                else:
-                    outputs = (loss,) + outputs[1:]
-        
-        return outputs
+    #     # Get input embeddings
+    #     if inputs_embeds is None:
+    #         inputs_embeds = self.word_embeddings(input_ids)
+
+    #     # L2P prompt selection using mean-pooled features (no extra forward)
+    #     prompt_pool = self.prompt_encoder[self.active_adapter]
+    #     prompt_results = prompt_pool(
+    #         x_embed=inputs_embeds, cls_features=None, task_id=task_id, train=self.training
+    #     )
+    #     selected_prompts = prompt_results["selected_prompts"]  # (B, top_k * V, C)
+
+    #     # Concatenate prompts with input embeddings
+    #     inputs_embeds_with_prompts = torch.cat((selected_prompts.to(inputs_embeds.dtype), inputs_embeds), dim=1)
+
+    #     # Update attention mask if provided
+    #     if attention_mask is not None:
+    #         prompt_attention_mask = torch.ones(
+    #             batch_size, selected_prompts.shape[1], device=attention_mask.device, dtype=attention_mask.dtype
+    #         )
+    #         attention_mask = torch.cat((prompt_attention_mask, attention_mask), dim=1)
+
+    #     # Forward through the model with prompts
+    #     outputs = self.base_model(
+    #         inputs_embeds=inputs_embeds_with_prompts,
+    #         attention_mask=attention_mask,
+    #         output_attentions=output_attentions,
+    #         output_hidden_states=output_hidden_states,
+    #         return_dict=return_dict,
+    #     )
+
+    #     # Add L2P specific losses if training
+    #     if self.training and prompt_results.get("reduce_sim", 0) != 0:
+    #         if hasattr(outputs, "loss") and outputs.loss is not None:
+    #             outputs.loss = outputs.loss - prompt_results["reduce_sim"]
+    #         elif labels is not None:
+    #             logits = outputs.logits
+    #             if self.config.problem_type is None:
+    #                 if self.base_model.num_labels == 1:
+    #                     self.config.problem_type = "regression"
+    #                 elif self.base_model.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
+    #                     self.config.problem_type = "single_label_classification"
+    #                 else:
+    #                     self.config.problem_type = "multi_label_classification"
+
+    #             if self.config.problem_type == "regression":
+    #                 loss_fct = MSELoss()
+    #                 if self.base_model.num_labels == 1:
+    #                     loss = loss_fct(logits.squeeze(), labels.squeeze())
+    #                 else:
+    #                     loss = loss_fct(logits, labels)
+    #             elif self.config.problem_type == "single_label_classification":
+    #                 loss_fct = CrossEntropyLoss()
+    #                 loss = loss_fct(logits.view(-1, self.base_model.num_labels), labels.view(-1))
+    #             elif self.config.problem_type == "multi_label_classification":
+    #                 loss_fct = BCEWithLogitsLoss()
+    #                 loss = loss_fct(logits, labels)
+
+    #             # Subtract similarity reduction loss (encourage diversity)
+    #             loss = loss - prompt_results["reduce_sim"]
+
+    #             if return_dict:
+    #                 outputs.loss = loss
+    #             else:
+    #                 outputs = (loss,) + outputs[1:]
+
+    #     return outputs
 
 
 class PeftModelForCausalLM(PeftModel):
@@ -1098,6 +1078,65 @@ class PeftModelForSeq2SeqLM(PeftModel):
             return self.base_model(
                 input_ids=input_ids, decoder_input_ids=decoder_input_ids, past_key_values=past_key_values, **kwargs
             )
+        elif peft_config.peft_type == PeftType.L2P:
+            # ---------------- L2P 训练前向（动态选择 + 拼接）----------------
+            if inputs_embeds is None:
+                inputs_embeds = self.word_embeddings(input_ids)
+            if decoder_inputs_embeds is None and decoder_input_ids is None:
+                decoder_input_ids = shift_tokens_right(
+                    labels, self.config.pad_token_id, self.config.decoder_start_token_id
+                )
+            if decoder_inputs_embeds is None:
+                decoder_inputs_embeds = self.word_embeddings(decoder_input_ids)
+
+            prompt_pool = self.prompt_encoder[self.active_adapter]
+            prompt_results = prompt_pool(
+                x_embed=inputs_embeds,
+                cls_features=None,
+                task_id=kwargs.pop("task_id", None),
+                train=self.training,
+            )
+            selected_prompts = prompt_results["selected_prompts"].to(inputs_embeds.dtype)  # (B, P, C)
+
+            # 拼接到 encoder 输入
+            enc_inputs = torch.cat((selected_prompts, inputs_embeds), dim=1)
+
+            # 扩展 encoder attention_mask
+            if attention_mask is not None:
+                p_len = selected_prompts.shape[1]
+                p_mask = torch.ones(batch_size, p_len, device=attention_mask.device, dtype=attention_mask.dtype)
+                kwargs["attention_mask"] = torch.cat((p_mask, attention_mask), dim=1)
+            else:
+                kwargs["attention_mask"] = torch.ones(
+                    batch_size, enc_inputs.size(1), device=enc_inputs.device, dtype=torch.long
+                )
+
+            if os.environ.get("l2p_debug", "") == "1":
+                try:
+                    print(f"[L2P][train] sel_prompts={tuple(selected_prompts.shape)} "
+                          f"enc_inputs={tuple(enc_inputs.shape)} "
+                          f"attn_mask={tuple(kwargs['attention_mask'].shape)}")
+                except Exception:
+                    pass
+
+            outputs = self.base_model(
+                inputs_embeds=enc_inputs,
+                decoder_inputs_embeds=decoder_inputs_embeds,
+                **kwargs,
+            )
+
+            # 合并正则项（若 prompt_pool 提供）
+            if self.training and hasattr(prompt_results, "get"):
+                loss = getattr(outputs, "loss", None)
+                if loss is not None:
+                    if "reduce_sim" in prompt_results:
+                        loss = loss - prompt_results["reduce_sim"]
+                    if "orth_loss" in prompt_results and hasattr(prompt_pool, "ortho_mu"):
+                        loss = loss + getattr(prompt_pool, "ortho_mu", 0.0) * prompt_results["orth_loss"]
+                    if "pull_loss" in prompt_results and getattr(prompt_pool, "pull_constraint", False):
+                        loss = loss + getattr(prompt_pool, "pull_constraint_coeff", 0.0) * prompt_results["pull_loss"]
+                    outputs.loss = loss
+            return outputs
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
@@ -1323,8 +1362,8 @@ class PeftModelForTokenClassification(PeftModel):
             )
 
         batch_size = input_ids.shape[0]
-        if attention_mask is not None:
-            # concat prompt attention mask
+        if attention_mask is not None and peft_config.peft_type != PeftType.L2P:
+            # concat prompt attention mask for static prompt methods only
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(self.device)
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
         if kwargs.get("position_ids", None) is not None:
@@ -1420,10 +1459,9 @@ class PeftModelForTokenClassification(PeftModel):
             logits = self.base_model.get_submodule(self.cls_layer_name)(sequence_output)
 
             loss = None
-            loss = None
             if labels is not None:
                 loss_fct = CrossEntropyLoss()
-                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                loss = loss_fct(logits.view(-1, self.base_model.num_labels), labels.view(-1))
 
             if not return_dict:
                 output = (logits,) + outputs[2:]
