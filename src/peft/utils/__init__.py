@@ -34,4 +34,4 @@ from .other import (
     _freeze_adapter,
     ModulesToSaveWrapper,
 )
-from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict
+from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict, set_l2p_task_id, get_l2p_task_id

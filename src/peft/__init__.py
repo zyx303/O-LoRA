@@ -58,5 +58,7 @@ from .utils import (
     get_peft_model_state_dict,
     prepare_model_for_int8_training,
     set_peft_model_state_dict,
+    set_l2p_task_id,
+    get_l2p_task_id,
     shift_tokens_right,
 )
