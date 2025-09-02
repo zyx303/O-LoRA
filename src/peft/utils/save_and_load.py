@@ -17,6 +17,41 @@ from .config import PeftType, PromptLearningConfig
 import torch
 
 
+def set_l2p_task_id(model, task_id, adapter_name="default"):
+    """
+    设置L2P模型的当前任务ID，用于任务迁移
+    
+    Args:
+        model: PEFT模型
+        task_id: 当前任务ID
+        adapter_name: adapter名称
+    """
+    config = model.peft_config.get(adapter_name)
+    if config and config.peft_type == PeftType.L2P:
+        config.current_task_id = task_id
+        model._current_task_id = task_id
+        print(f"L2P: 设置任务ID为 {task_id}")
+    else:
+        print(f"Warning: 模型不是L2P类型或adapter {adapter_name} 不存在")
+
+
+def get_l2p_task_id(model, adapter_name="default"):
+    """
+    获取L2P模型的当前任务ID
+    
+    Args:
+        model: PEFT模型
+        adapter_name: adapter名称
+    
+    Returns:
+        int: 当前任务ID，如果未设置则返回0
+    """
+    config = model.peft_config.get(adapter_name)
+    if config and config.peft_type == PeftType.L2P:
+        return getattr(config, 'current_task_id', getattr(model, '_current_task_id', 0))
+    return 0
+
+
 def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
     """
     Get the state dict of the Peft model.
@@ -114,12 +149,28 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
     elif isinstance(config, PromptLearningConfig):
         to_return = {}
         if config.peft_type == PeftType.L2P:
-            # 保存 L2P 的 prompt 池与 key
+            # 保存 L2P 的 prompt 池与 key，同时保存任务相关信息
             l2p = model.prompt_encoder[adapter_name]
             if not hasattr(l2p, "prompt") or not hasattr(l2p, "prompt_key"):
                 raise ValueError("L2P: prompt/prompt_key 未找到，无法持久化")
             to_return["prompt_pool"] = l2p.prompt.detach().cpu()
             to_return["prompt_key"] = l2p.prompt_key.detach().cpu()
+            
+            # 保存L2P任务相关的元信息，用于任务迁移
+            l2p_meta = {}
+            if hasattr(config, 'top_k'):
+                l2p_meta["top_k"] = config.top_k
+            if hasattr(config, 'pool_size'):
+                l2p_meta["pool_size"] = config.pool_size
+            # 尝试从环境变量或其他地方获取当前任务ID
+            current_task_id = getattr(config, 'current_task_id', None)
+            if current_task_id is None:
+                # 尝试从模型属性获取
+                current_task_id = getattr(model, '_current_task_id', 0)
+            l2p_meta["task_id"] = current_task_id
+            l2p_meta["shared_prompt_pool"] = getattr(config, 'shared_prompt_pool', True)
+            l2p_meta["shared_prompt_key"] = getattr(config, 'shared_prompt_key', True)
+            to_return["l2p_meta"] = l2p_meta
         else:
             # 其他 PromptLearningConfig 维持原逻辑
             if config.inference_mode:
@@ -274,14 +325,83 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                     break
     elif isinstance(config, PromptLearningConfig) or config.peft_type == PeftType.ADAPTION_PROMPT:
         if config.peft_type == PeftType.L2P:
-            # 从 state_dict 恢复 L2P 的 prompt 池与 key（直接写入参数）
+            # 从 state_dict 恢复 L2P 的 prompt 池与 key，并实现任务迁移
             l2p = model.prompt_encoder[adapter_name]
+            
+            # 加载基本的prompt和key
             if "prompt_pool" in state_dict:
                 with torch.no_grad():
                     l2p.prompt.data.copy_(state_dict["prompt_pool"].to(l2p.prompt.dtype))
             if "prompt_key" in state_dict and hasattr(l2p, "prompt_key"):
                 with torch.no_grad():
                     l2p.prompt_key.data.copy_(state_dict["prompt_key"].to(l2p.prompt_key.dtype))
+            
+            # 实现PILOT式的任务迁移逻辑
+            if "l2p_meta" in state_dict:
+                l2p_meta = state_dict["l2p_meta"]
+                prev_task_id = l2p_meta.get("task_id", 0)
+                top_k = l2p_meta.get("top_k", 5)
+                shared_prompt_pool = l2p_meta.get("shared_prompt_pool", True)
+                shared_prompt_key = l2p_meta.get("shared_prompt_key", True)
+                
+                # 获取当前任务ID（从config或环境变量）
+                current_task_id = getattr(config, 'current_task_id', None)
+                if current_task_id is None:
+                    current_task_id = getattr(model, '_current_task_id', prev_task_id + 1)
+                
+                # 如果是新任务且启用了共享prompt池，执行任务迁移
+                if (current_task_id > prev_task_id and shared_prompt_pool and 
+                    hasattr(l2p, 'init_task_prompts')):
+                    
+                    print(f"L2P: 执行任务迁移 - 从任务{prev_task_id}到任务{current_task_id}")
+                    print(f"L2P: top_k={top_k}, shared_pool={shared_prompt_pool}, shared_key={shared_prompt_key}")
+                    
+                    # 使用PILOT式的迁移逻辑
+                    with torch.no_grad():
+                        # Transfer previous learned prompt params to the new prompt
+                        if shared_prompt_pool:
+                            prev_start = prev_task_id * top_k
+                            prev_end = (prev_task_id + 1) * top_k
+                            
+                            cur_start = current_task_id * top_k
+                            cur_end = (current_task_id + 1) * top_k
+                            
+                            pool_size = l2p.prompt.shape[0]
+                            if (prev_end <= pool_size) and (cur_end <= pool_size):
+                                # Copy prompts from previous task to current task
+                                prev_idx = slice(prev_start, prev_end)
+                                cur_idx = slice(cur_start, cur_end)
+                                
+                                if l2p.prompt.grad is not None:
+                                    l2p.prompt.grad.zero_()
+                                l2p.prompt[cur_idx] = l2p.prompt[prev_idx].clone()
+                                print(f"L2P: 复制prompt from [{prev_start}:{prev_end}] to [{cur_start}:{cur_end}]")
+                        
+                        # Transfer previous learned prompt param keys to the new prompt
+                        if shared_prompt_key and hasattr(l2p, 'prompt_key'):
+                            prev_start = prev_task_id * top_k
+                            prev_end = (prev_task_id + 1) * top_k
+                            
+                            cur_start = current_task_id * top_k
+                            cur_end = (current_task_id + 1) * top_k
+                            
+                            pool_size = l2p.prompt_key.shape[0]
+                            if (prev_end <= pool_size) and (cur_end <= pool_size):
+                                # Copy prompt keys from previous task to current task
+                                prev_idx = slice(prev_start, prev_end)
+                                cur_idx = slice(cur_start, cur_end)
+                                
+                                if l2p.prompt_key.grad is not None:
+                                    l2p.prompt_key.grad.zero_()
+                                l2p.prompt_key[cur_idx] = l2p.prompt_key[prev_idx].clone()
+                                print(f"L2P: 复制prompt_key from [{prev_start}:{prev_end}] to [{cur_start}:{cur_end}]")
+                    
+                    # 更新模型和配置的任务ID
+                    config.current_task_id = current_task_id
+                    model._current_task_id = current_task_id
+                    
+                    print(f"L2P: 任务迁移完成，当前任务ID: {current_task_id}")
+            
             # 已手动复制，避免再通过 load_state_dict 加载这些键
             peft_model_state_dict = {}
         else:

@@ -240,3 +240,92 @@ class L2PPromptPool(torch.nn.Module):
         with torch.no_grad():
             self.prompt[dst_indices] = self.prompt[src_indices].clone()
             self.prompt_key[dst_indices] = self.prompt_key[src_indices].clone()
+    
+    def init_task_prompts(self, task_id, top_k, optimizer=None):
+        """
+        Initialize prompts for a new task by copying from previous task.
+        This follows the PILOT implementation pattern.
+        
+        Args:
+            task_id: Current task ID (0-indexed)
+            top_k: Number of prompts per task
+            optimizer: Optimizer to update after copying prompts
+        """
+        if task_id == 0:
+            # First task, no copying needed
+            return
+            
+        # Calculate indices for previous and current task
+        prev_start = (task_id - 1) * top_k
+        prev_end = task_id * top_k
+        
+        cur_start = prev_end  
+        cur_end = (task_id + 1) * top_k
+        
+        # Check if indices are within pool size
+        if (prev_end > self.pool_size) or (cur_end > self.pool_size):
+            print(f"Warning: Task {task_id} requires {cur_end} prompts but pool size is {self.pool_size}")
+            return
+            
+        # Copy prompts and keys from previous task
+        prev_idx = slice(prev_start, prev_end)
+        cur_idx = slice(cur_start, cur_end)
+        
+        with torch.no_grad():
+            # Clear gradients first
+            if self.prompt.grad is not None:
+                self.prompt.grad.zero_()
+            if self.prompt_key.grad is not None:
+                self.prompt_key.grad.zero_()
+                
+            # Copy prompt parameters
+            self.prompt[cur_idx] = self.prompt[prev_idx].clone()
+            self.prompt_key[cur_idx] = self.prompt_key[prev_idx].clone()
+            
+            # Update optimizer parameters if provided
+            if optimizer is not None:
+                # Refresh optimizer's parameter groups
+                for group in optimizer.param_groups:
+                    group['params'] = [p for p in group['params'] if p.requires_grad]
+    
+    def apply_prompt_transfer(self, prev_task_id, curr_task_id, top_k):
+        """
+        Apply prompt transfer from previous task to current task.
+        This is typically called when loading a model for a new task.
+        
+        Args:
+            prev_task_id: Previous task ID
+            curr_task_id: Current task ID  
+            top_k: Number of prompts per task
+        """
+        if prev_task_id < 0 or curr_task_id <= prev_task_id:
+            print(f"Invalid task IDs: prev={prev_task_id}, curr={curr_task_id}")
+            return
+            
+        # Calculate indices
+        prev_start = prev_task_id * top_k
+        prev_end = (prev_task_id + 1) * top_k
+        
+        curr_start = curr_task_id * top_k
+        curr_end = (curr_task_id + 1) * top_k
+        
+        # Check bounds
+        if curr_end > self.pool_size:
+            print(f"Warning: Task {curr_task_id} requires {curr_end} prompts but pool size is {self.pool_size}")
+            return
+            
+        if prev_end > self.pool_size:
+            print(f"Warning: Previous task {prev_task_id} range exceeds pool size")
+            return
+        
+        # Transfer prompts
+        prev_idx = slice(prev_start, prev_end)
+        curr_idx = slice(curr_start, curr_end)
+        
+        with torch.no_grad():
+            self.prompt[curr_idx] = self.prompt[prev_idx].clone()
+            self.prompt_key[curr_idx] = self.prompt_key[prev_idx].clone()
+            
+        print(f"Transferred prompts from task {prev_task_id} to task {curr_task_id}")
+        print(f"  Source range: [{prev_start}:{prev_end}]")
+        print(f"  Target range: [{curr_start}:{curr_end}]")

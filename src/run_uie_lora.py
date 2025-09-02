@@ -250,8 +250,14 @@ class UIETrainingArguments(Seq2SeqTrainingArguments):
     lamda_1: float = field(default = 0.5)
     lamda_2: float = field(default = 0)
     regularization: bool = field(default=True)
-    # #l2p
-    pool_size: int = field(default=50)
+    # L2P continual learning parameters
+    pool_size: int = field(default=50, metadata={"help": "Size of the L2P prompt pool"})
+    l2p_top_k: int = field(default=5, metadata={"help": "Number of top prompts to select in L2P"})
+    l2p_task_id: Optional[int] = field(default=None, metadata={"help": "Current task ID for L2P continual learning"})
+    l2p_num_classes: Optional[int] = field(default=None, metadata={"help": "Number of classes in current task"})
+    l2p_known_classes: int = field(default=0, metadata={"help": "Number of known classes from previous tasks"})
+    pull_constraint: bool = field(default=True, metadata={"help": "Whether to use pull constraint in L2P"})
+    pull_constraint_coeff: float = field(default=0.1, metadata={"help": "Pull constraint coefficient for L2P"})
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -426,7 +432,11 @@ def main():
             peft_config = L2PConfig(
                 num_virtual_tokens=model_args.num_virtual_tokens,
                 task_type=TaskType.SEQ_2_SEQ_LM,
-                inference_mode=False
+                inference_mode=False,
+                pool_size=training_args.pool_size,
+                top_k=training_args.l2p_top_k,
+                pull_constraint=training_args.pull_constraint,
+                pull_constraint_coeff=training_args.pull_constraint_coeff,
             )
         else:
             peft_config = LoraConfig(
@@ -455,6 +465,32 @@ def main():
             param.requires_grad = False
         elif name.find("historical_directions") != -1:
             param.requires_grad = False
+
+    # L2P specific parameter freezing
+    if model_args.peft_type.upper() == "L2P":
+        print("Applying L2P parameter freezing...")
+        trainable_params = 0
+        frozen_params = 0
+        
+        for name, param in model.named_parameters():
+            # Only allow L2P prompt pool and prompt key parameters to be trainable
+            if any(key in name for key in ["prompt", "prompt_key"]):
+                param.requires_grad = True
+                trainable_params += param.numel()
+                print(f"  Trainable: {name} ({param.numel()} params)")
+            # Also allow classification head to be trainable if it exists
+            elif any(key in name for key in ["classifier", "lm_head", "score"]):
+                param.requires_grad = True
+                trainable_params += param.numel()
+                print(f"  Trainable: {name} ({param.numel()} params)")
+            else:
+                param.requires_grad = False
+                frozen_params += param.numel()
+        
+        print(f"L2P Parameter Summary:")
+        print(f"  Trainable parameters: {trainable_params:,}")
+        print(f"  Frozen parameters: {frozen_params:,}")
+        print(f"  Trainable percentage: {100 * trainable_params / (trainable_params + frozen_params):.2f}%")
 
     if (
             hasattr(model.config, "max_position_embeddings")
