@@ -124,6 +124,10 @@ class ModelArguments:
         default="LORA",
         metadata={"help": "PEFT adapter type: LORA or SDLORA"},
     )
+    num_virtual_tokens: Optional[int] = field(
+        default=20,
+        metadata={"help": "The number of virtual tokens to use for the task."}
+    )
 
 
 @dataclass
@@ -230,7 +234,7 @@ class DataTrainingArguments:
         default=False,
         metadata={"help": "whether to preappend dataset name before the task input."}
     )
-
+    
 
 @dataclass
 class UIETrainingArguments(Seq2SeqTrainingArguments):
@@ -418,8 +422,9 @@ def main():
                 save_loranew=True,
             )
         elif model_args.peft_type.upper() == "L2P":
+            print(f"Using L2P with {model_args.num_virtual_tokens} virtual tokens.")
             peft_config = L2PConfig(
-                num_virtual_tokens=20,
+                num_virtual_tokens=model_args.num_virtual_tokens,
                 task_type=TaskType.SEQ_2_SEQ_LM,
                 inference_mode=False
             )
