@@ -162,7 +162,9 @@ class L2PPromptPool(torch.nn.Module):
     def l2_normalize(self, x, dim=None, epsilon=1e-12):
         """L2 normalize"""
         square_sum = torch.sum(x ** 2, dim=dim, keepdim=True)
-        x_inv_norm = torch.rsqrt(torch.maximum(square_sum, torch.tensor(epsilon, device=x.device)))
+        # 保证 epsilon 与 x 的 dtype/device 一致，避免混合精度/多卡下的 dtype 问题
+        eps = torch.tensor(epsilon, dtype=x.dtype, device=x.device)
+        x_inv_norm = torch.rsqrt(torch.maximum(square_sum, eps))
         return x * x_inv_norm
 
     def forward(self, x_embed, prompt_mask=None, cls_features=None, task_id=None, train=False):
@@ -197,32 +199,41 @@ class L2PPromptPool(torch.nn.Module):
         
         # Compute similarity between query and prompt keys
         similarity = torch.matmul(query_norm, prompt_key_norm.t())  # (batch_size, pool_size)
-        
         # Select top-k prompts based on similarity
         if self.top_k == -1:
             top_k = self.pool_size
         else:
             top_k = min(self.top_k, self.pool_size)
-            
+        # 更稳的 mask：使用 -inf 屏蔽被禁用的 prompt，且显式对齐维度/类型
         if prompt_mask is not None:
-            similarity = similarity * prompt_mask
-            
+            # 允许 mask 形状为 (pool,) 或 (B, pool)
+            if prompt_mask.dim() == 1:
+                prompt_mask = prompt_mask.unsqueeze(0).expand_as(similarity)
+            else:
+                assert prompt_mask.shape == similarity.shape, "prompt_mask shape must be (B, pool_size)"
+            prompt_mask = prompt_mask.to(dtype=similarity.dtype, device=similarity.device)
+            similarity = similarity.masked_fill(prompt_mask <= 0, float("-inf"))
+
         # Get top-k indices
         _, top_indices = torch.topk(similarity, top_k, dim=1)  # (batch_size, top_k)
 
-        # Gather prompts: (B, top_k, V, C) -> (B, top_k*V, C)
-        batched_prompt_raw = self.prompt[top_indices]  # (B, top_k, num_virtual_tokens, token_dim)
+        # 使用 gather 代替高级索引，减少隐式广播/复制带来的问题
+        # prompts: (1, pool, V, C) -> (B, pool, V, C)
+        prompts = self.prompt.unsqueeze(0).expand(batch_size, -1, -1, -1)
+        # indices: (B, top_k, 1, 1) -> (B, top_k, V, C)
+        index = top_indices.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, self.num_virtual_tokens, self.token_dim)
+        batched_prompt_raw = torch.gather(prompts, 1, index)  # (B, top_k, V, C)
         bsz, k, V, C = batched_prompt_raw.shape
         selected_prompts = batched_prompt_raw.reshape(bsz, k * V, C)
 
-        # Compute reduce_sim consistent with prompt.py Prompt
+        # Compute reduce_sim：使用完全平均，避免 batch/top_k/token_dim/world_size 变化导致项量级失衡
         batched_key_norm = prompt_key_norm[top_indices]  # (B, top_k, C)
         x_embed_norm = query_norm  # (B, C)
         sim = batched_key_norm * x_embed_norm.unsqueeze(1)  # (B, top_k, C)
-        reduce_sim = torch.sum(sim) / batch_size
+        reduce_sim = sim.mean()
 
         return {
-            "selected_prompts": selected_prompts,  # (B, top_k * num_virtual_tokens, C)
+            "selected_prompts": selected_prompts,
             "reduce_sim": reduce_sim,
             "similarities": similarity,
             "top_indices": top_indices,
