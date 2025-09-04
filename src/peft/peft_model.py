@@ -231,9 +231,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 top_k=getattr(config, "top_k", 5),
                 batchwise_prompt=getattr(config, "batchwise_prompt", False),
                 prompt_key_init=getattr(config, "prompt_key_init", "uniform"),
-                num_layers=1,
+                num_layers=config.num_layers,
                 use_prefix_tune_for_e_prompt=True,  # HiDe uses standard prompt tuning
-                num_heads=-1,
+                num_heads=config.num_attention_heads,
                 same_key_value=False,
             )
         else:

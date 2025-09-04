@@ -47,6 +47,7 @@ from peft import get_peft_config, get_peft_model, LoraConfig, TaskType, PeftMode
 from peft import SDLoraConfig  # new
 from peft import L2PConfig  # new
 from peft import PeftType  # new
+from peft import HidePromptConfig  # new
 
 from uie_collator import DataCollatorForUIE
 from uie_dataset_lora import gen_cache_path
@@ -127,10 +128,6 @@ class ModelArguments:
     num_virtual_tokens: Optional[int] = field(
         default=20,
         metadata={"help": "The number of virtual tokens to use for the task."}
-    )
-    l2p_engine: Optional[str] = field(
-        default="l2p",
-        metadata={"help": "Engine for prompt pool when using L2P: 'l2p' or 'hide'"}
     )
 
 
@@ -253,7 +250,7 @@ class UIETrainingArguments(Seq2SeqTrainingArguments):
     do_demo: bool = field(default=False, metadata={"help": "Whether to run the model as a demo in the terminal."})
     lamda_1: float = field(default = 0.5)
     lamda_2: float = field(default = 0)
-    regularization: bool = field(default=True)
+    regularization: bool = field(default=False)
     # L2P continual learning parameters
     pool_size: int = field(default=50, metadata={"help": "Size of the L2P prompt pool"})
     l2p_top_k: int = field(default=5, metadata={"help": "Number of top prompts to select in L2P"})
@@ -445,7 +442,13 @@ def main():
                 pull_constraint_coeff=training_args.pull_constraint_coeff,
                 engine=model_args.l2p_engine,
             )
-            
+        elif model_args.peft_type.upper() == "HIDE_PROMPT":
+            peft_config = HidePromptConfig(
+                num_virtual_tokens=model_args.num_virtual_tokens,
+                task_type=TaskType.SEQ_2_SEQ_LM,
+                inference_mode=False,
+                prompt_key=False
+            )
         else:
             peft_config = LoraConfig(
                 task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=model_args.lora_dim, lora_alpha=32, lora_dropout=0.1
