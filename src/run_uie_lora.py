@@ -258,6 +258,8 @@ class UIETrainingArguments(Seq2SeqTrainingArguments):
     l2p_known_classes: int = field(default=0, metadata={"help": "Number of known classes from previous tasks"})
     pull_constraint: bool = field(default=True, metadata={"help": "Whether to use pull constraint in L2P"})
     pull_constraint_coeff: float = field(default=0.1, metadata={"help": "Pull constraint coefficient for L2P"})
+    logging_strategy: str = field(default="steps", metadata={"help": "Log strategy to use."})
+    logging_steps: int = field(default=10)
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -438,12 +440,14 @@ def main():
                 pull_constraint=training_args.pull_constraint,
                 pull_constraint_coeff=training_args.pull_constraint_coeff,
             )
+            
         else:
             peft_config = LoraConfig(
                 task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=model_args.lora_dim, lora_alpha=32, lora_dropout=0.1
             )
         model = get_peft_model(model, peft_config)
-
+        with open(os.path.join(training_args.output_dir, "config.json"), "w") as f:
+            json.dump(training_args.to_dict(), f, indent=4)
     model.resize_token_embeddings(len(tokenizer))
 
     if 'llama' in model_args.model_name_or_path.lower():

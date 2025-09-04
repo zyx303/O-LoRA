@@ -226,14 +226,14 @@ class L2PPromptPool(torch.nn.Module):
         bsz, k, V, C = batched_prompt_raw.shape
         selected_prompts = batched_prompt_raw.reshape(bsz, k * V, C)
 
-        # Compute reduce_sim：使用完全平均，避免 batch/top_k/token_dim/world_size 变化导致项量级失衡
+        # Compute reduce_sim
         batched_key_norm = prompt_key_norm[top_indices]  # (B, top_k, C)
         x_embed_norm = query_norm  # (B, C)
         sim = batched_key_norm * x_embed_norm.unsqueeze(1)  # (B, top_k, C)
-        reduce_sim = sim.mean()
+        reduce_sim = torch.sum(sim) / batch_size
 
         return {
-            "selected_prompts": selected_prompts,
+            "selected_prompts": selected_prompts, # (B, top_k*V, C)
             "reduce_sim": reduce_sim,
             "similarities": similarity,
             "top_indices": top_indices,

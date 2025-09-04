@@ -54,91 +54,6 @@ class DenserEvalCallback(TrainerCallback):
 
 class UIETrainer(Seq2SeqTrainer):
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.l2p_task_tracker = getattr(self.args, 'l2p_task_tracker', None)
-
-    def compute_loss(self, model, inputs, return_outputs=False):
-        """
-        重写compute_loss以支持L2P的logits masking和pull constraint
-        """
-        # 检查是否使用L2P
-        is_l2p = self._is_l2p_model(model)
-        
-        if is_l2p:
-            # 为L2P前向传播添加task_id
-            task_id = getattr(self.args, 'l2p_task_id', 0)
-            inputs['task_id'] = task_id
-        
-        # 执行前向传播
-        if self.label_smoother is not None and "labels" in inputs:
-            labels = inputs.pop("labels")
-        else:
-            labels = None
-            
-        outputs = model(**inputs)
-        
-        # L2P logits masking for continual learning
-        if is_l2p and labels is not None and model.training:
-            self._apply_l2p_logits_masking(outputs)
-        
-        # 计算损失
-        if labels is not None:
-            if self.label_smoother is not None:
-                loss = self.label_smoother(outputs, labels)
-            else:
-                loss = outputs.loss if hasattr(outputs, 'loss') and outputs.loss is not None else self._compute_custom_loss(outputs, labels)
-                
-            # 添加L2P的pull constraint损失
-            if is_l2p and hasattr(outputs, 'reduce_sim') and getattr(self.args, 'pull_constraint', False):
-                pull_coeff = getattr(self.args, 'pull_constraint_coeff', 0.1)
-                loss = loss - pull_coeff * outputs.reduce_sim
-        else:
-            loss = outputs.loss if hasattr(outputs, 'loss') else outputs["loss"]
-
-        return (loss, outputs) if return_outputs else loss
-    
-    def _is_l2p_model(self, model):
-        """检查模型是否使用L2P"""
-        if hasattr(model, 'peft_config') and hasattr(model, 'active_adapter'):
-            peft_config = model.peft_config.get(model.active_adapter)
-            return peft_config and peft_config.peft_type == PeftType.L2P
-        return False
-    
-    def _apply_l2p_logits_masking(self, outputs):
-        """
-        应用L2P的logits masking，屏蔽旧类的预测
-        这里需要根据具体任务来确定已知类的数量
-        """
-        if hasattr(outputs, 'logits') and outputs.logits is not None:
-            # 这里需要从配置或参数中获取已知类的数量
-            # 在序列到序列任务中，logits masking的应用可能需要特殊处理
-            known_classes = getattr(self.args, 'l2p_known_classes', 0)
-            if known_classes > 0:
-                # 对于seq2seq模型，logits的形状可能是(batch_size, seq_len, vocab_size)
-                # 这里的masking需要根据具体的任务类型来实现
-                logits = outputs.logits
-                if logits.dim() == 3:  # seq2seq case: (batch, seq_len, vocab_size)
-                    # 对于生成任务，可能不需要类级别的masking
-                    # 或者需要在token级别进行特殊处理
-                    pass
-                elif logits.dim() == 2:  # classification case: (batch, num_classes)
-                    logits[:, :known_classes] = float('-inf')
-                    outputs.logits = logits
-    
-    def _compute_custom_loss(self, outputs, labels):
-        """计算自定义损失"""
-        if hasattr(outputs, 'logits'):
-            logits = outputs.logits
-            # 对于seq2seq任务，使用交叉熵损失
-            loss_fct = torch.nn.CrossEntropyLoss(ignore_index=-100)
-            if logits.dim() > 2:
-                loss = loss_fct(logits.view(-1, logits.size(-1)), labels.view(-1))
-            else:
-                loss = loss_fct(logits, labels)
-            return loss
-        else:
-            raise ValueError("No logits found in model outputs")
 
     def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
         """
@@ -166,7 +81,7 @@ class UIETrainer(Seq2SeqTrainer):
             return loss_mb.reduce_mean().detach().to(self.args.device)
 
         with self.compute_loss_context_manager():
-            loss = self.compute_loss(model, inputs)
+            loss,outputs = self.compute_loss(model, inputs,return_outputs=True)
 
         if self.args.n_gpu > 1:
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
@@ -175,7 +90,13 @@ class UIETrainer(Seq2SeqTrainer):
             # deepspeed handles loss scaling by gradient_accumulation_steps in its `backward`
             loss = loss / self.args.gradient_accumulation_steps
 
+        ####################### l2p loss #######################
+        if 'reduce_sim' in outputs:
+            l2p_loss = outputs['reduce_sim']
+            loss -= l2p_loss * self.args.pull_constraint_coeff
+
         ########################### Regularization ##########################
+        
         if self.args.regularization:
             orthogonal_loss = 0.
             # 关闭ortho

@@ -1111,31 +1111,20 @@ class PeftModelForSeq2SeqLM(PeftModel):
                     batch_size, enc_inputs.size(1), device=enc_inputs.device, dtype=torch.long
                 )
 
-            if os.environ.get("l2p_debug", "") == "1":
-                try:
-                    print(f"[L2P][train] sel_prompts={tuple(selected_prompts.shape)} "
-                          f"enc_inputs={tuple(enc_inputs.shape)} "
-                          f"attn_mask={tuple(kwargs['attention_mask'].shape)}")
-                except Exception:
-                    pass
+            # if os.environ.get("l2p_debug", "") == "1":
+            #     try:
+            #         print(f"[L2P][train] sel_prompts={tuple(selected_prompts.shape)} "
+            #               f"enc_inputs={tuple(enc_inputs.shape)} "
+            #               f"attn_mask={tuple(kwargs['attention_mask'].shape)}")
+            #     except Exception:
+            #         pass
 
             outputs = self.base_model(
                 inputs_embeds=enc_inputs,
                 decoder_inputs_embeds=decoder_inputs_embeds,
                 **kwargs,
             )
-
-            # 合并正则项（若 prompt_pool 提供）
-            if self.training and hasattr(prompt_results, "get"):
-                loss = getattr(outputs, "loss", None)
-                if loss is not None:
-                    if "reduce_sim" in prompt_results:
-                        loss = loss - prompt_results["reduce_sim"]
-                    if "orth_loss" in prompt_results and hasattr(prompt_pool, "ortho_mu"):
-                        loss = loss + getattr(prompt_pool, "ortho_mu", 0.0) * prompt_results["orth_loss"]
-                    if "pull_loss" in prompt_results and getattr(prompt_pool, "pull_constraint", False):
-                        loss = loss + getattr(prompt_pool, "pull_constraint_coeff", 0.0) * prompt_results["pull_loss"]
-                    outputs.loss = loss
+            outputs['reduce_sim'] = prompt_results['reduce_sim']
             return outputs
         else:
             if inputs_embeds is None:
