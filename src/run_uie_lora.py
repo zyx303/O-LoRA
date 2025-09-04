@@ -128,6 +128,10 @@ class ModelArguments:
         default=20,
         metadata={"help": "The number of virtual tokens to use for the task."}
     )
+    l2p_engine: Optional[str] = field(
+        default="l2p",
+        metadata={"help": "Engine for prompt pool when using L2P: 'l2p' or 'hide'"}
+    )
 
 
 @dataclass
@@ -437,6 +441,7 @@ def main():
                 top_k=training_args.l2p_top_k,
                 pull_constraint=training_args.pull_constraint,
                 pull_constraint_coeff=training_args.pull_constraint_coeff,
+                engine=model_args.l2p_engine,
             )
         else:
             peft_config = LoraConfig(

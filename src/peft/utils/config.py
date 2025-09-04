@@ -33,6 +33,7 @@ class PeftType(str, enum.Enum):
     ADAPTION_PROMPT = "ADAPTION_PROMPT"
     SDLORA = "SDLORA"
     L2P = "L2P"
+    HIDE_PROMPT = "HIDE_PROMPT"
 
 
 class TaskType(str, enum.Enum):
