@@ -187,3 +187,11 @@ infer batchsize != 1 时em=0（一个batch里面task不同）
 > 若你需要我进一步打开 PromptVitNet/backbone 代码，定位 G-Prompt/E-Prompt 的具体注入层与 reduce_sim 的定义，我可以在活动编辑器中查看并逐行解释。
 >
 > 找到具有 1 个许可证类型的类似代码
+
+![image-20250903190156329](./experiment.assets/image-20250903190156329.png)
+
+|      | order-1 | order-2 | order-3 |
+| ---- | ------- | ------- | ------- |
+| l2p* | 60.3    | 61.7    | 61.1    |
+| l2p  | 58.4507 | 46.5691 |         |
+

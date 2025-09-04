@@ -171,6 +171,24 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
             l2p_meta["shared_prompt_pool"] = getattr(config, 'shared_prompt_pool', True)
             l2p_meta["shared_prompt_key"] = getattr(config, 'shared_prompt_key', True)
             to_return["l2p_meta"] = l2p_meta
+        elif config.peft_type == PeftType.HIDE_PROMPT:
+            # 保存 HiDe-Prompt 的池（prompt）与可选的 prompt_key，以及任务相关 meta
+            eprompt = model.prompt_encoder[adapter_name]
+            if not hasattr(eprompt, "prompt"):
+                raise ValueError("HiDe-Prompt: prompt 未找到，无法持久化")
+            to_return["hide_prompt_pool"] = eprompt.prompt.detach().cpu()
+            if getattr(eprompt, "prompt_key", None) is not None:
+                to_return["hide_prompt_key"] = eprompt.prompt_key.detach().cpu()
+
+            hide_meta = {
+                "pool_size": getattr(config, "pool_size", getattr(eprompt, "pool_size", None)),
+                "top_k": getattr(config, "top_k", getattr(eprompt, "top_k", None)),
+            }
+            # 透传任务ID，便于推理时自动构造 prompt_mask
+            current_task_id = getattr(config, "current_task_id", getattr(model, "_current_task_id", None))
+            if current_task_id is not None:
+                hide_meta["task_id"] = int(current_task_id)
+            to_return["hide_prompt_meta"] = hide_meta
         else:
             # 其他 PromptLearningConfig 维持原逻辑
             if config.inference_mode:
@@ -403,6 +421,23 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                     print(f"L2P: 任务迁移完成，当前任务ID: {current_task_id}")
             
             # 已手动复制，避免再通过 load_state_dict 加载这些键
+            peft_model_state_dict = {}
+        elif config.peft_type == PeftType.HIDE_PROMPT:
+            # 恢复 HiDe-Prompt 的 prompt 池与可选的 key，并传递任务ID
+            eprompt = model.prompt_encoder[adapter_name]
+            if "hide_prompt_pool" in state_dict:
+                with torch.no_grad():
+                    eprompt.prompt.data.copy_(state_dict["hide_prompt_pool"].to(eprompt.prompt.dtype))
+            if "hide_prompt_key" in state_dict and getattr(eprompt, "prompt_key", None) is not None:
+                with torch.no_grad():
+                    eprompt.prompt_key.data.copy_(state_dict["hide_prompt_key"].to(eprompt.prompt_key.dtype))
+
+            if "hide_prompt_meta" in state_dict:
+                meta = state_dict["hide_prompt_meta"]
+                if "task_id" in meta:
+                    config.current_task_id = int(meta["task_id"])  # 记录到 config 与 model
+                    model._current_task_id = int(meta["task_id"]) 
+            # 已处理专有字段，避免重复加载
             peft_model_state_dict = {}
         else:
             peft_model_state_dict = state_dict

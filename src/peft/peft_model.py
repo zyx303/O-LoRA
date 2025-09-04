@@ -1226,12 +1226,30 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 decoder_inputs_embeds = self.word_embeddings(decoder_input_ids)
 
             eprompt: HiDeEPrompt = self.prompt_encoder[self.active_adapter]
+            # Auto-build prompt_mask by task_id when requested (vision-style HiDe logic)
+            use_prompt_mask = kwargs.pop("use_prompt_mask", False)
+            task_id = kwargs.pop("task_id", None)
+            prompt_idx = kwargs.pop("prompt_idx", None)
+            prompt_weight = kwargs.pop("prompt_weight", None)
+            prompt_momentum = kwargs.pop("prompt_momentum", 0)
+            prompt_mask = kwargs.pop("prompt_mask", None)
+            if use_prompt_mask and self.training and task_id is not None and prompt_mask is None:
+                start = task_id * eprompt.top_k
+                end = (task_id + 1) * eprompt.top_k
+                if end <= eprompt.pool_size:
+                    single = torch.arange(start, end, device=inputs_embeds.device)
+                    prompt_mask = single.unsqueeze(0).expand(inputs_embeds.size(0), -1).contiguous()
+                else:
+                    prompt_mask = None
+                if task_id == 0:
+                    prompt_momentum = 0
+
             out = eprompt(
                 x_embed=inputs_embeds,
-                prompt_mask=kwargs.pop("prompt_mask", None),
-                prompt_idx=kwargs.pop("prompt_idx", None),
-                prompt_weight=kwargs.pop("prompt_weight", None),
-                prompt_momentum=kwargs.pop("prompt_momentum", 0),
+                prompt_mask=prompt_mask,
+                prompt_idx=prompt_idx,
+                prompt_weight=prompt_weight,
+                prompt_momentum=prompt_momentum,
             )
             batched_prompt = out["batched_prompt"][0].to(inputs_embeds.dtype)  # (B, P, C)
 
@@ -1383,12 +1401,30 @@ class PeftModelForSeq2SeqLM(PeftModel):
             p_tokens = selected_prompts
         else:
             eprompt: HiDeEPrompt = self.prompt_encoder[self.active_adapter]
+            # Optionally synthesize prompt_mask from task_id during generation if provided
+            use_prompt_mask = model_kwargs.pop("use_prompt_mask", False)
+            task_id = model_kwargs.pop("task_id", None)
+            prompt_idx = model_kwargs.pop("prompt_idx", None)
+            prompt_weight = model_kwargs.pop("prompt_weight", None)
+            prompt_momentum = model_kwargs.pop("prompt_momentum", 0)
+            prompt_mask = model_kwargs.pop("prompt_mask", None)
+            if use_prompt_mask and task_id is not None and prompt_mask is None:
+                start = task_id * eprompt.top_k
+                end = (task_id + 1) * eprompt.top_k
+                if end <= eprompt.pool_size:
+                    single = torch.arange(start, end, device=inputs_embeds.device)
+                    prompt_mask = single.unsqueeze(0).expand(inputs_embeds.size(0), -1).contiguous()
+                else:
+                    prompt_mask = None
+                if task_id == 0:
+                    prompt_momentum = 0
+
             out = eprompt(
                 x_embed=inputs_embeds,
-                prompt_mask=model_kwargs.pop("prompt_mask", None),
-                prompt_idx=model_kwargs.pop("prompt_idx", None),
-                prompt_weight=model_kwargs.pop("prompt_weight", None),
-                prompt_momentum=model_kwargs.pop("prompt_momentum", 0),
+                prompt_mask=prompt_mask,
+                prompt_idx=prompt_idx,
+                prompt_weight=prompt_weight,
+                prompt_momentum=prompt_momentum,
             )
             p_tokens = out["batched_prompt"][0].to(inputs_embeds.dtype)
 

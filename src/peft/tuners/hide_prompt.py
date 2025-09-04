@@ -15,7 +15,7 @@ class HidePromptConfig(PromptLearningConfig):
     """
 
     pool_size: int = field(default=10, metadata={"help": "Size of the prompt pool"})
-    top_k: int = field(default=5, metadata={"help": "Number of prompts to select"})
+    top_k: int = field(default=1, metadata={"help": "Number of prompts to select"})
     prompt_init: str = field(default="uniform", metadata={"help": "Init for prompt weights"})
     prompt_key: bool = field(default=False, metadata={"help": "Use learnable keys"})
     prompt_key_init: str = field(default="uniform", metadata={"help": "Init for prompt keys"})
