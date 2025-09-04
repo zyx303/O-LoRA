@@ -29,6 +29,7 @@ from .tuners import (
     PromptEncoderConfig,
     PromptTuningConfig,
     L2PConfig,
+    HidePromptConfig,
 )
 from .utils import PromptLearningConfig
 
@@ -49,6 +50,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING = {
     "ADALORA": AdaLoraConfig,
     "SDLORA": SDLoraConfig,
     "L2P": L2PConfig,
+    "HIDE_PROMPT": HidePromptConfig,
 }
 
 

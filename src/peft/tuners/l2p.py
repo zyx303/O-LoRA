@@ -88,6 +88,19 @@ class L2PConfig(PromptLearningConfig):
         default=0.1,
         metadata={"help": "Pull constraint coefficient"},
     )
+    # Extra toggles for comparison and compatibility with HiDe-Prompt
+    use_hide_prompt: bool = field(
+        default=False,
+        metadata={"help": "Use HiDe-Prompt wrapper instead of L2P pool when True"},
+    )
+    prompt_key: bool = field(
+        default=True,
+        metadata={"help": "Use learnable prompt keys (HiDe-compatible)"},
+    )
+    batchwise_prompt: bool = field(
+        default=False,
+        metadata={"help": "Select prompts batch-wise (HiDe option)"},
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.L2P

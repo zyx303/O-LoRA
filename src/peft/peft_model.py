@@ -38,6 +38,7 @@ from .tuners import (
     PromptEncoder,
     L2PPromptPool,
 )
+from .tuners.hide_prompt import EPrompt as HiDeEPrompt
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     WEIGHTS_NAME,
@@ -214,8 +215,27 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         elif config.peft_type == PeftType.PREFIX_TUNING:
             prompt_encoder = PrefixEncoder(config)
         elif config.peft_type == PeftType.L2P:
-            # Initialize L2P prompt pool as the prompt encoder for dynamic prompt selection
+            # Initialize dynamic prompt pool for L2P
             prompt_encoder = L2PPromptPool(config)
+        elif config.peft_type == PeftType.HIDE_PROMPT:
+            # Standalone HiDe-Prompt using provided EPrompt implementation (prompt style, non-prefix)
+            # HiDe-Prompt defaults: prompt_key=False, shared_prompt_key=False
+            prompt_encoder = HiDeEPrompt(
+                length=config.num_virtual_tokens,
+                embed_dim=config.token_dim,
+                embedding_key="mean",
+                prompt_init=getattr(config, "prompt_init", "uniform"),
+                prompt_pool=True,
+                prompt_key=getattr(config, "prompt_key", False),  # HiDe default: False
+                pool_size=getattr(config, "pool_size", 10),
+                top_k=getattr(config, "top_k", 5),
+                batchwise_prompt=getattr(config, "batchwise_prompt", False),
+                prompt_key_init=getattr(config, "prompt_key_init", "uniform"),
+                num_layers=1,
+                use_prefix_tune_for_e_prompt=True,  # HiDe uses standard prompt tuning
+                num_heads=-1,
+                same_key_value=False,
+            )
         else:
             raise ValueError("Not supported")
         self.prompt_encoder.update(torch.nn.ModuleDict({adapter_name: prompt_encoder}))
@@ -534,7 +554,7 @@ class PeftModelForSequenceClassification(PeftModel):
             )
 
         batch_size = input_ids.shape[0]
-        if attention_mask is not None and peft_config.peft_type != PeftType.L2P:
+        if attention_mask is not None and peft_config.peft_type not in (PeftType.L2P, PeftType.HIDE_PROMPT):
             # concat prompt attention mask for static prompt types
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(self.device)
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
@@ -564,6 +584,37 @@ class PeftModelForSequenceClassification(PeftModel):
                 return_dict=return_dict,
                 task_id=kwargs.pop("task_id", None),
                 **kwargs,
+            )
+        elif peft_config.peft_type == PeftType.HIDE_PROMPT:
+            # HiDe-Prompt expects indices/masks/weights from kwargs
+            if inputs_embeds is None:
+                inputs_embeds = self.word_embeddings(input_ids)
+
+            eprompt: HiDeEPrompt = self.prompt_encoder[self.active_adapter]
+            out = eprompt(
+                x_embed=inputs_embeds,
+                prompt_mask=kwargs.pop("prompt_mask", None),
+                prompt_idx=kwargs.pop("prompt_idx", None),
+                prompt_weight=kwargs.pop("prompt_weight", None),
+                prompt_momentum=kwargs.pop("prompt_momentum", 0),
+            )
+            batched_prompt = out["batched_prompt"][0]  # (B, top_k*length, C) with num_layers=1
+
+            inputs_embeds_with_prompts = torch.cat((batched_prompt.to(inputs_embeds.dtype), inputs_embeds), dim=1)
+
+            if attention_mask is not None:
+                p_mask = torch.ones(
+                    batch_size, batched_prompt.shape[1], device=attention_mask.device, dtype=attention_mask.dtype
+                )
+                attention_mask = torch.cat((p_mask, attention_mask), dim=1)
+
+            return self.base_model(
+                inputs_embeds=inputs_embeds_with_prompts,
+                attention_mask=attention_mask,
+                labels=labels,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
             )
         else:
             if kwargs.get("token_type_ids", None) is not None:
@@ -652,89 +703,79 @@ class PeftModelForSequenceClassification(PeftModel):
                 attentions=outputs.attentions,
             )
 
-    # def _l2p_forward(
-    #     self,
-    #     input_ids=None,
-    #     attention_mask=None,
-    #     inputs_embeds=None,
-    #     labels=None,
-    #     output_attentions=None,
-    #     output_hidden_states=None,
-    #     return_dict=None,
-    #     task_id=None,
-    #     **kwargs,
-    # ):
-    #     """
-    #     Forward pass for L2P (Learning to Prompt) method.
-    #     """
-    #     batch_size = input_ids.shape[0]
+    def _l2p_forward(
+        self,
+        input_ids=None,
+        attention_mask=None,
+        inputs_embeds=None,
+        labels=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+        task_id=None,
+        **kwargs,
+    ):
+        """Forward with dynamic prompt selection for L2P/HiDe wrapper."""
+        batch_size = input_ids.shape[0]
 
-    #     # Get input embeddings
-    #     if inputs_embeds is None:
-    #         inputs_embeds = self.word_embeddings(input_ids)
+        if inputs_embeds is None:
+            inputs_embeds = self.word_embeddings(input_ids)
 
-    #     # L2P prompt selection using mean-pooled features (no extra forward)
-    #     prompt_pool = self.prompt_encoder[self.active_adapter]
-    #     prompt_results = prompt_pool(
-    #         x_embed=inputs_embeds, cls_features=None, task_id=task_id, train=self.training
-    #     )
-    #     selected_prompts = prompt_results["selected_prompts"]  # (B, top_k * V, C)
+        prompt_pool = self.prompt_encoder[self.active_adapter]
+        prompt_results = prompt_pool(
+            x_embed=inputs_embeds, cls_features=None, task_id=task_id, train=self.training
+        )
+        selected_prompts = prompt_results["selected_prompts"].to(inputs_embeds.dtype)
 
-    #     # Concatenate prompts with input embeddings
-    #     inputs_embeds_with_prompts = torch.cat((selected_prompts.to(inputs_embeds.dtype), inputs_embeds), dim=1)
+        inputs_embeds_with_prompts = torch.cat((selected_prompts, inputs_embeds), dim=1)
 
-    #     # Update attention mask if provided
-    #     if attention_mask is not None:
-    #         prompt_attention_mask = torch.ones(
-    #             batch_size, selected_prompts.shape[1], device=attention_mask.device, dtype=attention_mask.dtype
-    #         )
-    #         attention_mask = torch.cat((prompt_attention_mask, attention_mask), dim=1)
+        if attention_mask is not None:
+            p_mask = torch.ones(
+                batch_size, selected_prompts.shape[1], device=attention_mask.device, dtype=attention_mask.dtype
+            )
+            attention_mask = torch.cat((p_mask, attention_mask), dim=1)
 
-    #     # Forward through the model with prompts
-    #     outputs = self.base_model(
-    #         inputs_embeds=inputs_embeds_with_prompts,
-    #         attention_mask=attention_mask,
-    #         output_attentions=output_attentions,
-    #         output_hidden_states=output_hidden_states,
-    #         return_dict=return_dict,
-    #     )
+        outputs = self.base_model(
+            inputs_embeds=inputs_embeds_with_prompts,
+            attention_mask=attention_mask,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
 
-    #     # Add L2P specific losses if training
-    #     if self.training and prompt_results.get("reduce_sim", 0) != 0:
-    #         if hasattr(outputs, "loss") and outputs.loss is not None:
-    #             outputs.loss = outputs.loss - prompt_results["reduce_sim"]
-    #         elif labels is not None:
-    #             logits = outputs.logits
-    #             if self.config.problem_type is None:
-    #                 if self.base_model.num_labels == 1:
-    #                     self.config.problem_type = "regression"
-    #                 elif self.base_model.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
-    #                     self.config.problem_type = "single_label_classification"
-    #                 else:
-    #                     self.config.problem_type = "multi_label_classification"
+        if self.training and prompt_results.get("reduce_sim", 0) != 0:
+            if hasattr(outputs, "loss") and outputs.loss is not None:
+                outputs.loss = outputs.loss - prompt_results["reduce_sim"]
+            elif labels is not None:
+                logits = outputs.logits
+                if self.config.problem_type is None:
+                    if self.base_model.num_labels == 1:
+                        self.config.problem_type = "regression"
+                    elif self.base_model.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
+                        self.config.problem_type = "single_label_classification"
+                    else:
+                        self.config.problem_type = "multi_label_classification"
 
-    #             if self.config.problem_type == "regression":
-    #                 loss_fct = MSELoss()
-    #                 if self.base_model.num_labels == 1:
-    #                     loss = loss_fct(logits.squeeze(), labels.squeeze())
-    #                 else:
-    #                     loss = loss_fct(logits, labels)
-    #             elif self.config.problem_type == "single_label_classification":
-    #                 loss_fct = CrossEntropyLoss()
-    #                 loss = loss_fct(logits.view(-1, self.base_model.num_labels), labels.view(-1))
-    #             elif self.config.problem_type == "multi_label_classification":
-    #                 loss_fct = BCEWithLogitsLoss()
-    #                 loss = loss_fct(logits, labels)
+                if self.config.problem_type == "regression":
+                    loss_fct = MSELoss()
+                    if self.base_model.num_labels == 1:
+                        loss = loss_fct(logits.squeeze(), labels.squeeze())
+                    else:
+                        loss = loss_fct(logits, labels)
+                elif self.config.problem_type == "single_label_classification":
+                    loss_fct = CrossEntropyLoss()
+                    loss = loss_fct(logits.view(-1, self.base_model.num_labels), labels.view(-1))
+                elif self.config.problem_type == "multi_label_classification":
+                    loss_fct = BCEWithLogitsLoss()
+                    loss = loss_fct(logits, labels)
 
-    #             # Subtract similarity reduction loss (encourage diversity)
-    #             loss = loss - prompt_results["reduce_sim"]
+                loss = loss - prompt_results["reduce_sim"]
+                if return_dict:
+                    outputs.loss = loss
+                else:
+                    outputs = (loss,) + outputs[1:]
 
-    #             if return_dict:
-    #                 outputs.loss = loss
-    #             else:
-    #                 outputs = (loss,) + outputs[1:]
-
-    #     return outputs
+        return outputs
 
 
 class PeftModelForCausalLM(PeftModel):
@@ -803,7 +844,7 @@ class PeftModelForCausalLM(PeftModel):
             )
 
         batch_size = input_ids.shape[0]
-        if attention_mask is not None and peft_config.peft_type != PeftType.L2P:
+        if attention_mask is not None and peft_config.peft_type not in (PeftType.L2P, PeftType.HIDE_PROMPT):
             # concat prompt attention mask for static prompt types
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(self.device)
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
@@ -856,6 +897,31 @@ class PeftModelForCausalLM(PeftModel):
                 kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
 
             inputs_embeds = torch.cat((selected_prompts.to(inputs_embeds.dtype), inputs_embeds), dim=1)
+            return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
+        elif peft_config.peft_type == PeftType.HIDE_PROMPT:
+            # HiDe-Prompt: use provided indices/masks/weights to build prompts
+            if inputs_embeds is None:
+                inputs_embeds = self.word_embeddings(input_ids)
+
+            eprompt: HiDeEPrompt = self.prompt_encoder[self.active_adapter]
+            out = eprompt(
+                x_embed=inputs_embeds,
+                prompt_mask=kwargs.pop("prompt_mask", None),
+                prompt_idx=kwargs.pop("prompt_idx", None),
+                prompt_weight=kwargs.pop("prompt_weight", None),
+                prompt_momentum=kwargs.pop("prompt_momentum", 0),
+            )
+            batched_prompt = out["batched_prompt"][0]  # (B, P, C)
+
+            # Extend attention mask and labels
+            if attention_mask is not None:
+                prefix_attention_mask = torch.ones(inputs_embeds.shape[0], batched_prompt.shape[1], device=attention_mask.device)
+                kwargs["attention_mask"] = torch.cat((prefix_attention_mask, attention_mask), dim=1)
+            if labels is not None:
+                prefix_labels = torch.full((inputs_embeds.shape[0], batched_prompt.shape[1]), -100, device=labels.device)
+                kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
+
+            inputs_embeds = torch.cat((batched_prompt.to(inputs_embeds.dtype), inputs_embeds), dim=1)
             return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
         else:
             if inputs_embeds is None:
@@ -965,6 +1031,28 @@ class PeftModelForCausalLM(PeftModel):
                             )
                         model_kwargs["inputs_embeds"] = torch.cat((selected_prompts, inputs_embeds), dim=1)
                         model_kwargs["input_ids"] = None
+                    elif peft_config.peft_type == PeftType.HIDE_PROMPT:
+                        # HiDe-Prompt: 首步根据提供的 idx/mask 构建并拼接 prompts
+                        input_ids = model_kwargs["input_ids"]
+                        inputs_embeds = self.word_embeddings(input_ids)
+                        eprompt: HiDeEPrompt = self.prompt_encoder[self.active_adapter]
+                        out = eprompt(
+                            x_embed=inputs_embeds,
+                            prompt_mask=model_kwargs.pop("prompt_mask", None),
+                            prompt_idx=model_kwargs.pop("prompt_idx", None),
+                            prompt_weight=model_kwargs.pop("prompt_weight", None),
+                            prompt_momentum=model_kwargs.pop("prompt_momentum", 0),
+                        )
+                        batched_prompt = out["batched_prompt"][0]
+                        if model_kwargs.get("attention_mask", None) is not None:
+                            prefix_attention_mask = torch.ones(
+                                input_ids.shape[0], batched_prompt.shape[1], device=model_kwargs["attention_mask"].device
+                            )
+                            model_kwargs["attention_mask"] = torch.cat(
+                                (prefix_attention_mask, model_kwargs["attention_mask"]), dim=1
+                            )
+                        model_kwargs["inputs_embeds"] = torch.cat((batched_prompt, inputs_embeds), dim=1)
+                        model_kwargs["input_ids"] = None
                     else:
                         # 其他静态 prompt 方法
                         inputs_embeds = self.word_embeddings(model_kwargs["input_ids"])
@@ -1051,7 +1139,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
             )
 
         batch_size = input_ids.shape[0]
-        if decoder_attention_mask is not None:
+        if decoder_attention_mask is not None and peft_config.peft_type not in (PeftType.L2P, PeftType.HIDE_PROMPT):
             # concat prompt attention mask
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(self.device)
             decoder_attention_mask = torch.cat((prefix_attention_mask, decoder_attention_mask), dim=1)
@@ -1126,6 +1214,44 @@ class PeftModelForSeq2SeqLM(PeftModel):
             )
             outputs['reduce_sim'] = prompt_results['reduce_sim']
             return outputs
+        elif peft_config.peft_type == PeftType.HIDE_PROMPT:
+            # HiDe-Prompt on encoder side (T5/LLaMA-style seq2seq enc): build and prepend prompts
+            if inputs_embeds is None:
+                inputs_embeds = self.word_embeddings(input_ids)
+            if decoder_inputs_embeds is None and decoder_input_ids is None:
+                decoder_input_ids = shift_tokens_right(
+                    labels, self.config.pad_token_id, self.config.decoder_start_token_id
+                )
+            if decoder_inputs_embeds is None:
+                decoder_inputs_embeds = self.word_embeddings(decoder_input_ids)
+
+            eprompt: HiDeEPrompt = self.prompt_encoder[self.active_adapter]
+            out = eprompt(
+                x_embed=inputs_embeds,
+                prompt_mask=kwargs.pop("prompt_mask", None),
+                prompt_idx=kwargs.pop("prompt_idx", None),
+                prompt_weight=kwargs.pop("prompt_weight", None),
+                prompt_momentum=kwargs.pop("prompt_momentum", 0),
+            )
+            batched_prompt = out["batched_prompt"][0].to(inputs_embeds.dtype)  # (B, P, C)
+
+            enc_inputs = torch.cat((batched_prompt, inputs_embeds), dim=1)
+
+            # 扩展 encoder attention_mask
+            if attention_mask is not None:
+                p_len = batched_prompt.shape[1]
+                p_mask = torch.ones(batch_size, p_len, device=attention_mask.device, dtype=attention_mask.dtype)
+                kwargs["attention_mask"] = torch.cat((p_mask, attention_mask), dim=1)
+            else:
+                kwargs["attention_mask"] = torch.ones(
+                    batch_size, enc_inputs.size(1), device=enc_inputs.device, dtype=torch.long
+                )
+
+            return self.base_model(
+                inputs_embeds=enc_inputs,
+                decoder_inputs_embeds=decoder_inputs_embeds,
+                **kwargs,
+            )
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
@@ -1188,6 +1314,9 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 elif peft_config.peft_type == PeftType.L2P:
                     # L2P: 动态选择并拼接 encoder 侧 prompt，由 _prepare_encoder_decoder_kwargs_for_generation 完成
                     outputs = self.base_model.generate(**kwargs)
+                elif peft_config.peft_type == PeftType.HIDE_PROMPT:
+                    # HiDe: 动态（外部提供索引）拼接 encoder 侧 prompt，由 _prepare_encoder_decoder_kwargs_for_generation 完成
+                    outputs = self.base_model.generate(**kwargs)
                 else:
                     raise NotImplementedError
         except:
@@ -1231,7 +1360,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
         peft_config = self.active_peft_config
         # 先调用原始实现，拿到基础的 model_kwargs
         model_kwargs = self.base_model_prepare_encoder_decoder_kwargs_for_generation(*args, **kwargs)
-        if not isinstance(peft_config, PromptLearningConfig) or peft_config.peft_type != PeftType.L2P:
+        if not isinstance(peft_config, PromptLearningConfig) or peft_config.peft_type not in (PeftType.L2P, PeftType.HIDE_PROMPT):
             return model_kwargs
 
         # 获取输入 input_ids（按 transformers 的签名，input_ids 是第一个位置参数）
@@ -1242,23 +1371,35 @@ class PeftModelForSeq2SeqLM(PeftModel):
         # 准备 encoder 输入并进行 L2P 动态选择
         attention_mask = model_kwargs.get("attention_mask", None)
         inputs_embeds = self.word_embeddings(input_ids)
-        prompt_pool = self.prompt_encoder[self.active_adapter]
-        prompt_results = prompt_pool(
-            x_embed=inputs_embeds,
-            cls_features=None,
-            task_id=model_kwargs.pop("task_id", None),
-            train=self.training,
-        )
-        selected_prompts = prompt_results["selected_prompts"].to(inputs_embeds.dtype)
+        if peft_config.peft_type == PeftType.L2P:
+            prompt_pool = self.prompt_encoder[self.active_adapter]
+            prompt_results = prompt_pool(
+                x_embed=inputs_embeds,
+                cls_features=None,
+                task_id=model_kwargs.pop("task_id", None),
+                train=self.training,
+            )
+            selected_prompts = prompt_results["selected_prompts"].to(inputs_embeds.dtype)
+            p_tokens = selected_prompts
+        else:
+            eprompt: HiDeEPrompt = self.prompt_encoder[self.active_adapter]
+            out = eprompt(
+                x_embed=inputs_embeds,
+                prompt_mask=model_kwargs.pop("prompt_mask", None),
+                prompt_idx=model_kwargs.pop("prompt_idx", None),
+                prompt_weight=model_kwargs.pop("prompt_weight", None),
+                prompt_momentum=model_kwargs.pop("prompt_momentum", 0),
+            )
+            p_tokens = out["batched_prompt"][0].to(inputs_embeds.dtype)
 
         # 拼接 attention mask（encoder 侧）
         if attention_mask is not None:
             prefix_attention_mask = torch.ones(
-                inputs_embeds.shape[0], selected_prompts.shape[1], device=attention_mask.device, dtype=attention_mask.dtype
+                inputs_embeds.shape[0], p_tokens.shape[1], device=attention_mask.device, dtype=attention_mask.dtype
             )
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
 
-        encoder_inputs = torch.cat((selected_prompts, inputs_embeds), dim=1)
+        encoder_inputs = torch.cat((p_tokens, inputs_embeds), dim=1)
 
         # 直接计算 encoder_outputs，避免原实现只接受 input_ids 的限制
         encoder = self.base_model.get_encoder()
@@ -1351,7 +1492,7 @@ class PeftModelForTokenClassification(PeftModel):
             )
 
         batch_size = input_ids.shape[0]
-        if attention_mask is not None and peft_config.peft_type != PeftType.L2P:
+        if attention_mask is not None and peft_config.peft_type not in (PeftType.L2P, PeftType.HIDE_PROMPT):
             # concat prompt attention mask for static prompt methods only
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(self.device)
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
