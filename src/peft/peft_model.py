@@ -1259,7 +1259,8 @@ class PeftModelForSeq2SeqLM(PeftModel):
                     prompt_mask = None
                 if task_id == 0:
                     prompt_momentum = 0
-
+            # out: dict with keys: batched_prompt, prompt_idx
+            # prompt_idx: (B, k) indices in pool  (20,1)
             out = eprompt(
                 x_embed=inputs_embeds,
                 prompt_mask=prompt_mask,
@@ -1268,7 +1269,8 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 prompt_momentum=prompt_momentum,
             )
             batched_prompt = out["batched_prompt"][0].to(inputs_embeds.dtype)  # (B, P, C)
-
+            # inputs_embeds: (B, L, C)
+            # batched_prompt: (num_layers ,B , 2, P ,num_heads ,heads_embed_dim)
             enc_inputs = torch.cat((batched_prompt, inputs_embeds), dim=1)
 
             # 扩展 encoder attention_mask
