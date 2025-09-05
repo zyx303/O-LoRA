@@ -1295,7 +1295,21 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 assert dual == 2, "HiDe EPrompt should output dual=2 dimension for K/V"
 
                 device = inputs_embeds.device
-                dtype = self.base_model_torch_dtype or inputs_embeds.dtype
+                # Choose a target dtype that matches the hidden_states of the target attention block
+                # Priority:
+                # 1) If targeting decoder (kv_target>0) and we have decoder_inputs_embeds, use its dtype
+                # 2) Otherwise try the base_model first parameter's dtype (covers deepspeed/mixed precision)
+                # 3) Fallback to inputs_embeds.dtype
+                try:
+                    base_param_dtype = next(self.base_model.parameters()).dtype
+                except Exception:
+                    base_param_dtype = None
+                if base_param_dtype is not None:
+                    dtype = base_param_dtype
+                elif kv_target > 0 and decoder_inputs_embeds is not None:
+                    dtype = decoder_inputs_embeds.dtype
+                else:
+                    dtype = inputs_embeds.dtype
 
                 # Decide submodule span (encoder+decoder vs single). For seq2seq we use 2 submodules by default.
                 num_submodules = getattr(self.active_peft_config, "num_transformer_submodules", 2)
@@ -1317,8 +1331,8 @@ class PeftModelForSeq2SeqLM(PeftModel):
                         k = batched_prompt[li, :, 0]  # (B, P, H, D)
                         v = batched_prompt[li, :, 1]  # (B, P, H, D)
                         # reorder to (B, H, P, D)
-                        k = k.permute(0, 2, 1, 3).contiguous()
-                        v = v.permute(0, 2, 1, 3).contiguous()
+                        k = k.permute(0, 2, 1, 3).contiguous().to(dtype)
+                        v = v.permute(0, 2, 1, 3).contiguous().to(dtype)
                         kv_pair_start = max(0, min(kv_target, num_submodules - 1)) * 2
                         pack[kv_pair_start] = k
                         pack[kv_pair_start + 1] = v
@@ -1535,7 +1549,12 @@ class PeftModelForSeq2SeqLM(PeftModel):
 
                 S = num_submodules * 2
                 device = inputs_embeds.device
-                dtype = self.base_model_torch_dtype or inputs_embeds.dtype
+                # Choose dtype robustly for generation as well
+                try:
+                    base_param_dtype = next(self.base_model.parameters()).dtype
+                except Exception:
+                    base_param_dtype = None
+                dtype = base_param_dtype or inputs_embeds.dtype
                 if prefix_layers is None:
                     active_layers = set(range(num_layers))
                 else:
@@ -1546,8 +1565,8 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 for li in range(num_layers):
                     pack = torch.zeros((S, B, H, P, D), device=device, dtype=dtype)
                     if li in active_layers:
-                        k = batched_prompt[li, :, 0].permute(0, 2, 1, 3).contiguous()  # (B,H,P,D)
-                        v = batched_prompt[li, :, 1].permute(0, 2, 1, 3).contiguous()  # (B,H,P,D)
+                        k = batched_prompt[li, :, 0].permute(0, 2, 1, 3).contiguous().to(dtype)  # (B,H,P,D)
+                        v = batched_prompt[li, :, 1].permute(0, 2, 1, 3).contiguous().to(dtype)  # (B,H,P,D)
                         pack[kv_pair_start] = k
                         pack[kv_pair_start + 1] = v
                     layer_packs.append(pack)
