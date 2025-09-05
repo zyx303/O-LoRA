@@ -1227,8 +1227,13 @@ class PeftModelForSeq2SeqLM(PeftModel):
 
             eprompt: HiDeEPrompt = self.prompt_encoder[self.active_adapter]
             # Auto-build prompt_mask by task_id when requested (vision-style HiDe logic)
-            use_prompt_mask = kwargs.pop("use_prompt_mask", False)
+            use_prompt_mask = kwargs.pop("use_prompt_mask", None)
             task_id = kwargs.pop("task_id", None)
+            # Backfill defaults: enable mask by default and derive task_id from config/model if missing
+            if task_id is None:
+                task_id = getattr(self.active_peft_config, "current_task_id", getattr(self, "_current_task_id", None))
+            if use_prompt_mask is None:
+                use_prompt_mask = True if task_id is not None else False
             prompt_idx = kwargs.pop("prompt_idx", None)
             prompt_weight = kwargs.pop("prompt_weight", None)
             prompt_momentum = kwargs.pop("prompt_momentum", 0)
@@ -1402,8 +1407,12 @@ class PeftModelForSeq2SeqLM(PeftModel):
         else:
             eprompt: HiDeEPrompt = self.prompt_encoder[self.active_adapter]
             # Optionally synthesize prompt_mask from task_id during generation if provided
-            use_prompt_mask = model_kwargs.pop("use_prompt_mask", False)
+            use_prompt_mask = model_kwargs.pop("use_prompt_mask", None)
             task_id = model_kwargs.pop("task_id", None)
+            if task_id is None:
+                task_id = getattr(self.active_peft_config, "current_task_id", getattr(self, "_current_task_id", None))
+            if use_prompt_mask is None:
+                use_prompt_mask = True if task_id is not None else False
             prompt_idx = model_kwargs.pop("prompt_idx", None)
             prompt_weight = model_kwargs.pop("prompt_weight", None)
             prompt_momentum = model_kwargs.pop("prompt_momentum", 0)
