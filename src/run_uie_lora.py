@@ -48,7 +48,11 @@ from peft import SDLoraConfig  # new
 from peft import L2PConfig  # new
 from peft import PeftType  # new
 from peft import HidePromptConfig  # new
-
+from peft.utils.save_and_load import (
+    set_hide_prompt_task_id,
+    get_hide_prompt_task_id,
+    update_hide_prompt_after_task,
+)
 from uie_collator import DataCollatorForUIE
 from uie_dataset_lora import gen_cache_path
 
@@ -261,6 +265,10 @@ class UIETrainingArguments(Seq2SeqTrainingArguments):
     pull_constraint_coeff: float = field(default=0.1, metadata={"help": "Pull constraint coefficient for L2P"})
     logging_strategy: str = field(default="steps", metadata={"help": "Log strategy to use."})
     logging_steps: int = field(default=10)
+    # HiDe-Prompt continual learning parameters
+    hide_task_id: Optional[int] = field(default=None, metadata={"help": "Current task ID for HiDe-Prompt CL"})
+    prompt_momentum: float = field(default=0.0, metadata={"help": "Momentum for post-task HiDe prompt update [0-1]"})
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -458,6 +466,13 @@ def main():
             json.dump(training_args.to_dict(), f, indent=4)
     model.resize_token_embeddings(len(tokenizer))
 
+    # If using HiDe-Prompt and a task id is specified, set it early for forward/generation
+    try:
+        if model_args.peft_type.upper() == "HIDE_PROMPT" and training_args.hide_task_id is not None:
+            set_hide_prompt_task_id(model, int(training_args.hide_task_id))
+    except Exception as _e:
+        logger.warning(f"Failed to set HiDe task id pre-training: {_e}")
+
     if 'llama' in model_args.model_name_or_path.lower():
         model.generation_config.bos_token_id = 1
         model.generation_config.eos_token_id = 2
@@ -615,6 +630,22 @@ def main():
         elif last_checkpoint is not None:
             checkpoint = last_checkpoint
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
+
+        # For HiDe-Prompt: apply momentum update on e_prompt after finishing this task, then save
+        try:
+            if model_args.peft_type.upper() == "HIDE_PROMPT":
+                base_model = trainer.model.module if hasattr(trainer.model, "module") else trainer.model
+                cur_task_id = (
+                    int(training_args.hide_task_id)
+                    if training_args.hide_task_id is not None
+                    else int(get_hide_prompt_task_id(base_model))
+                )
+                if update_hide_prompt_after_task(base_model, cur_task_id, float(training_args.prompt_momentum)):
+                    logger.info(
+                        f"HiDe-Prompt: updated e_prompt for task {cur_task_id} with momentum={training_args.prompt_momentum}"
+                    )
+        except Exception as _e:
+            logger.warning(f"HiDe-Prompt post-task update failed: {_e}")
 
         peft_model_id = training_args.output_dir + "/adapter"
         trainer.model.save_pretrained(peft_model_id)  

@@ -52,6 +52,89 @@ def get_l2p_task_id(model, adapter_name="default"):
     return 0
 
 
+# ---------------- HiDe-Prompt helpers ----------------
+def set_hide_prompt_task_id(model, task_id, adapter_name="default"):
+    """
+    设置HiDe-Prompt模型的当前任务ID，便于推理阶段自动构造 mask/索引。
+    """
+    config = model.peft_config.get(adapter_name)
+    if config and config.peft_type == PeftType.HIDE_PROMPT:
+        config.current_task_id = task_id
+        # 同步到模型实例，供运行期兜底
+        model._current_task_id = task_id
+        print(f"HiDe-Prompt: 设置任务ID为 {task_id}")
+    else:
+        print(f"Warning: 模型不是HiDe-Prompt类型或adapter {adapter_name} 不存在")
+
+
+def get_hide_prompt_task_id(model, adapter_name="default"):
+    """
+    获取HiDe-Prompt模型的当前任务ID，未设置则返回0。
+    """
+    config = model.peft_config.get(adapter_name)
+    if config and config.peft_type == PeftType.HIDE_PROMPT:
+        return getattr(config, 'current_task_id', getattr(model, '_current_task_id', 0))
+    return 0
+
+
+@torch.no_grad()
+def update_hide_prompt_after_task(model, task_id, prompt_momentum: float, adapter_name: str = "default"):
+    """
+    在完成当前 task 后，以动量方式持久化更新 HiDe 的 e_prompt，逻辑对齐 hide_prompt_wtp_and_tap_engine：
+      P_t <- (1 - m) * P_t + m * mean(P_{<t})
+
+    兼容两种参数形状：
+      - prefix 风格: (num_layers, 2, pool_size, length, num_heads, head_dim)
+      - 非 prefix 风格: (num_layers, pool_size, length, embed_dim)
+
+    注意：要求 task_id > 0 且 prompt_momentum > 0 才会执行；无历史则跳过。
+    """
+    if prompt_momentum <= 0 or task_id <= 0:
+        return False
+
+    # 解析 HiDe 模块
+    try:
+        eprompt = model.prompt_encoder[adapter_name]
+    except Exception:
+        print("Warning: 未找到 HiDe-Prompt 模块，跳过动量更新")
+        return False
+
+    if not hasattr(eprompt, "prompt"):
+        print("Warning: HiDe-Prompt 未包含可学习 prompt，跳过动量更新")
+        return False
+
+    prompt = eprompt.prompt
+    try:
+        # prefix 风格: (L, 2, P, T, H, D)
+        if getattr(eprompt, "use_prefix_tune_for_e_prompt", False) and prompt.dim() == 6:
+            L, dual, P, T, H, D = prompt.shape
+            if task_id >= P:
+                print(f"Warning: task_id={task_id} 超过 prompt 池大小 P={P}，跳过动量更新")
+                return False
+            # 历史均值：在 pool 维度(=2)上对 [0:task_id] 求均值，保持维度便于广播
+            prev_mean = prompt[:, :, 0:task_id].detach().clone().mean(dim=2, keepdim=True)  # (L,2,1,T,H,D)
+            cur = prompt[:, :, task_id].detach().clone()  # (L,2,T,H,D)
+            prompt[:, :, task_id].copy_((1.0 - prompt_momentum) * cur + prompt_momentum * prev_mean.squeeze(2))
+            return True
+
+        # 非 prefix 风格: (L, P, T, C)
+        if prompt.dim() == 4:
+            L, P, T, C = prompt.shape
+            if task_id >= P:
+                print(f"Warning: task_id={task_id} 超过 prompt 池大小 P={P}，跳过动量更新")
+                return False
+            prev_mean = prompt[:, 0:task_id].detach().clone().mean(dim=1, keepdim=True)  # (L,1,T,C)
+            cur = prompt[:, task_id].detach().clone()  # (L,T,C)
+            prompt[:, task_id].copy_((1.0 - prompt_momentum) * cur + prompt_momentum * prev_mean.squeeze(1))
+            return True
+
+        print("Warning: 未识别的 HiDe-Prompt 参数形状，跳过动量更新")
+        return False
+    except Exception as e:
+        print(f"Warning: HiDe-Prompt 动量更新失败: {e}")
+        return False
+
+
 def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
     """
     Get the state dict of the Peft model.
