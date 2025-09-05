@@ -1279,93 +1279,74 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 prompt_momentum=prompt_momentum,
             )
 
+            batched_prompt = out["batched_prompt"].to(inputs_embeds.dtype)
+            # Assemble past_key_values in the same general structure as prefix_tuning
+            # Target: per-layer pack shaped (S, B, H, P, D), where S = num_transformer_submodules * 2
+            # Here we place KV into the first submodule slot (S>=2): [K0, V0, ...], others zeroed.
+            num_layers = batched_prompt.shape[0]
+            B = batched_prompt.shape[1]
+            dual = batched_prompt.shape[2]  # 2 => K/V
+            P = batched_prompt.shape[3]
+            H = batched_prompt.shape[4]
+            D = batched_prompt.shape[5]
+
+            # Validate expected K/V dimension
+            assert dual == 2, "HiDe EPrompt should output dual=2 dimension for K/V"
+
+            device = inputs_embeds.device
+            # Choose a target dtype that matches the hidden_states of the target attention block
+            # Priority:
+            # 1) If targeting decoder (kv_target>0) and we have decoder_inputs_embeds, use its dtype
+            # 2) Otherwise try the base_model first parameter's dtype (covers deepspeed/mixed precision)
+            # 3) Fallback to inputs_embeds.dtype
             try:
-                batched_prompt = out["batched_prompt"].to(inputs_embeds.dtype)
-                # Assemble past_key_values in the same general structure as prefix_tuning
-                # Target: per-layer pack shaped (S, B, H, P, D), where S = num_transformer_submodules * 2
-                # Here we place KV into the first submodule slot (S>=2): [K0, V0, ...], others zeroed.
-                num_layers = batched_prompt.shape[0]
-                B = batched_prompt.shape[1]
-                dual = batched_prompt.shape[2]  # 2 => K/V
-                P = batched_prompt.shape[3]
-                H = batched_prompt.shape[4]
-                D = batched_prompt.shape[5]
-
-                # Validate expected K/V dimension
-                assert dual == 2, "HiDe EPrompt should output dual=2 dimension for K/V"
-
-                device = inputs_embeds.device
-                # Choose a target dtype that matches the hidden_states of the target attention block
-                # Priority:
-                # 1) If targeting decoder (kv_target>0) and we have decoder_inputs_embeds, use its dtype
-                # 2) Otherwise try the base_model first parameter's dtype (covers deepspeed/mixed precision)
-                # 3) Fallback to inputs_embeds.dtype
-                try:
-                    base_param_dtype = next(self.base_model.parameters()).dtype
-                except Exception:
-                    base_param_dtype = None
-                if base_param_dtype is not None:
-                    dtype = base_param_dtype
-                elif kv_target > 0 and decoder_inputs_embeds is not None:
-                    dtype = decoder_inputs_embeds.dtype
-                else:
-                    dtype = inputs_embeds.dtype
-
-                # Decide submodule span (encoder+decoder vs single). For seq2seq we use 2 submodules by default.
-                num_submodules = getattr(self.active_peft_config, "num_transformer_submodules", 2)
-                S = num_submodules * 2
-
-                # Build per-layer pack
-                layer_packs = []
-                # Normalize prefix_layers into a set of indices
-                if prefix_layers is None:
-                    active_layers = set(range(num_layers))
-                else:
-                    active_layers = set(int(i) for i in prefix_layers if 0 <= int(i) < num_layers)
-
-                for li in range(num_layers):
-                    # zeros for all slots by default
-                    pack = torch.zeros((S, B, H, P, D), device=device, dtype=dtype)
-                    if li in active_layers:
-                        # Fill the selected submodule's KV slots (pair at [kv_pair_start, kv_pair_start+1]).
-                        k = batched_prompt[li, :, 0]  # (B, P, H, D)
-                        v = batched_prompt[li, :, 1]  # (B, P, H, D)
-                        # reorder to (B, H, P, D)
-                        k = k.permute(0, 2, 1, 3).contiguous().to(dtype)
-                        v = v.permute(0, 2, 1, 3).contiguous().to(dtype)
-                        kv_pair_start = max(0, min(kv_target, num_submodules - 1)) * 2
-                        pack[kv_pair_start] = k
-                        pack[kv_pair_start + 1] = v
-                    layer_packs.append(pack)
-
-                past_key_values = tuple(layer_packs)
-
-                # Unlike token-prepend, KV prefix doesn't need to expand attention_mask
-                return self.base_model(
-                    inputs_embeds=inputs_embeds,
-                    decoder_inputs_embeds=decoder_inputs_embeds,
-                    past_key_values=past_key_values,
-                    **kwargs,
-                )
+                base_param_dtype = next(self.base_model.parameters()).dtype
             except Exception:
-                # Fallback to the previous safe path (token-prepend) if any incompatibility arises
-                batched_prompt_tokens = out["batched_prompt"][0].to(inputs_embeds.dtype)
-                enc_inputs = torch.cat((batched_prompt_tokens, inputs_embeds), dim=1)
+                base_param_dtype = None
+            if base_param_dtype is not None:
+                dtype = base_param_dtype
+            elif kv_target > 0 and decoder_inputs_embeds is not None:
+                dtype = decoder_inputs_embeds.dtype
+            else:
+                dtype = inputs_embeds.dtype
 
-                if attention_mask is not None:
-                    p_len = batched_prompt_tokens.shape[1]
-                    p_mask = torch.ones(batch_size, p_len, device=attention_mask.device, dtype=attention_mask.dtype)
-                    kwargs["attention_mask"] = torch.cat((p_mask, attention_mask), dim=1)
-                else:
-                    kwargs["attention_mask"] = torch.ones(
-                        batch_size, enc_inputs.size(1), device=enc_inputs.device, dtype=torch.long
-                    )
+            # Decide submodule span (encoder+decoder vs single). For seq2seq we use 2 submodules by default.
+            num_submodules = getattr(self.active_peft_config, "num_transformer_submodules", 2)
+            S = num_submodules * 2
 
-                return self.base_model(
-                    inputs_embeds=enc_inputs,
-                    decoder_inputs_embeds=decoder_inputs_embeds,
-                    **kwargs,
-                )
+            # Build per-layer pack
+            layer_packs = []
+            # Normalize prefix_layers into a set of indices
+            if prefix_layers is None:
+                active_layers = set(range(num_layers))
+            else:
+                active_layers = set(int(i) for i in prefix_layers if 0 <= int(i) < num_layers)
+
+            for li in range(num_layers):
+                # zeros for all slots by default
+                pack = torch.zeros((S, B, H, P, D), device=device, dtype=dtype)
+                if li in active_layers:
+                    # Fill the selected submodule's KV slots (pair at [kv_pair_start, kv_pair_start+1]).
+                    k = batched_prompt[li, :, 0]  # (B, P, H, D)
+                    v = batched_prompt[li, :, 1]  # (B, P, H, D)
+                    # reorder to (B, H, P, D)
+                    k = k.permute(0, 2, 1, 3).contiguous().to(dtype)
+                    v = v.permute(0, 2, 1, 3).contiguous().to(dtype)
+                    kv_pair_start = max(0, min(kv_target, num_submodules - 1)) * 2
+                    pack[kv_pair_start] = k
+                    pack[kv_pair_start + 1] = v
+                layer_packs.append(pack)
+
+            past_key_values = tuple(layer_packs)
+
+            # Unlike token-prepend, KV prefix doesn't need to expand attention_mask
+            return self.base_model(
+                inputs_embeds=inputs_embeds,
+                decoder_inputs_embeds=decoder_inputs_embeds,
+                past_key_values=past_key_values,
+                **kwargs,
+            )
+            
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)

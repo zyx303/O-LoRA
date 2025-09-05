@@ -79,33 +79,20 @@ def get_hide_prompt_task_id(model, adapter_name="default"):
 
 @torch.no_grad()
 def update_hide_prompt_after_task(model, task_id, prompt_momentum: float, adapter_name: str = "default"):
-    """
-    在完成当前 task 后，以动量方式持久化更新 HiDe 的 e_prompt，逻辑对齐 hide_prompt_wtp_and_tap_engine：
-      P_t <- (1 - m) * P_t + m * mean(P_{<t})
-
-    兼容两种参数形状：
-      - prefix 风格: (num_layers, 2, pool_size, length, num_heads, head_dim)
-      - 非 prefix 风格: (num_layers, pool_size, length, embed_dim)
-
-    注意：要求 task_id > 0 且 prompt_momentum > 0 才会执行；无历史则跳过。
-    """
     if prompt_momentum <= 0 or task_id <= 0:
         return False
 
-    # 解析 HiDe 模块
     try:
         eprompt = model.prompt_encoder[adapter_name]
     except Exception:
-        print("Warning: 未找到 HiDe-Prompt 模块，跳过动量更新")
         return False
 
     if not hasattr(eprompt, "prompt"):
-        print("Warning: HiDe-Prompt 未包含可学习 prompt，跳过动量更新")
         return False
 
     prompt = eprompt.prompt
     try:
-        # prefix 风格: (L, 2, P, T, H, D)
+        # prefix : (L, 2, P, T, H, D)
         if getattr(eprompt, "use_prefix_tune_for_e_prompt", False) and prompt.dim() == 6:
             L, dual, P, T, H, D = prompt.shape
             if task_id >= P:
@@ -117,7 +104,7 @@ def update_hide_prompt_after_task(model, task_id, prompt_momentum: float, adapte
             prompt[:, :, task_id].copy_((1.0 - prompt_momentum) * cur + prompt_momentum * prev_mean.squeeze(2))
             return True
 
-        # 非 prefix 风格: (L, P, T, C)
+        # 非 prefix : (L, P, T, C)
         if prompt.dim() == 4:
             L, P, T, C = prompt.shape
             if task_id >= P:
