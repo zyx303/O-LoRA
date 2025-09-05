@@ -1,6 +1,6 @@
 1. 训练的参数是ψ（lm_head), prompt
-2. default是只启用e_prompt（vit的前5个layer, 用prefix)：
-    
+2. default是只启用e_prompt（vit的**前5个layer**, 用prefix，train和infer都是)：
+   
 
 > 原论文有一个结构是TII，用另一个original model预测task id（prompt id)，这里不实现，假设task id已知
 
@@ -118,3 +118,5 @@
 > - HiDe-Prompt 不使用基于相似度的提示选择（无 `prompt_key`、无 `reduce_sim`）
 > - 而是使用**任务身份推断**（TII）+ **提示掩码**的层次化分解策略
 > - 这体现了 HiDe-Prompt 与传统基于键值匹配方法（如 L2P/DualPrompt）的根本差异
+
+> prompt_weight不使用

@@ -573,16 +573,21 @@ class VisionTransformer(nn.Module):
         self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
     def forward_features(self, x, task_id=-1, prompt_id=None, prompt_weight=None, train=False, prompt_momentum=0):
+        #将输入图像分块并投影到嵌入空间，输出 [B, N_patches, embed_dim]
         x = self.patch_embed(x)
-
+        #如果使用class token，将其扩展到batch大小并拼接到序列前面，输出 [B, 1+N_patches, embed_dim]
         if self.cls_token is not None:
             x = torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
-
+        #添加位置编码并应用dropout
         x = self.pos_drop(x + self.pos_embed)
 
         if self.grad_checkpointing and not torch.jit.is_scripting():
             x = checkpoint_seq(self.blocks, x)
         else:
+            # 训练时根据 task_id 构造提示掩码，限制只能使用当前任务的提示
+            # 计算当前任务在提示池中的索引范围 [start, end)
+            # 如果超出池大小则设为None
+            # 第一个任务时不使用动量
             if self.use_g_prompt or self.use_e_prompt:
                 if self.use_prompt_mask and train:
                     start = task_id * self.e_prompt.top_k
@@ -595,6 +600,9 @@ class VisionTransformer(nn.Module):
                         prompt_momentum = 0
                 else:
                     prompt_mask = None
+                # 初始化G-Prompt和E-Prompt计数器
+                # 调用EPrompt模块生成批量提示
+                # 根据mask/id/weight选择相应提示并进行可能的动量融合
                 g_prompt_counter = -1
                 e_prompt_counter = -1
 
@@ -602,6 +610,9 @@ class VisionTransformer(nn.Module):
                 e_prompt = res['batched_prompt']
 
                 for i, block in enumerate(self.blocks):
+                    # 如果当前层需要G-Prompt，增加计数器
+                    # 若使用prefix-tuning，取出对应层的G-Prompt K/V前缀
+                    # 将G-Prompt传入block（prefix模式）或设为None（token模式）
                     if i in self.g_prompt_layer_idx:
                         if self.use_prefix_tune_for_g_prompt:
                             g_prompt_counter += 1
@@ -612,6 +623,9 @@ class VisionTransformer(nn.Module):
                             g_prompt = None
                         x = block(x, prompt=g_prompt)
 
+                    # 如果当前层需要E-Prompt，增加计数器
+                    # Prefix-tuning模式：将E-Prompt K/V前缀传入注意力层
+                    # Prompt-tuning模式：将E-Prompt token直接拼接到序列前面
                     elif i in self.e_prompt_layer_idx:
                         e_prompt_counter += 1
                         if self.use_prefix_tune_for_e_prompt:
