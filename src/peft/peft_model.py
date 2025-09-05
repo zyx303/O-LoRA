@@ -239,6 +239,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         else:
             raise ValueError("Not supported")
         self.prompt_encoder.update(torch.nn.ModuleDict({adapter_name: prompt_encoder}))
+        # Ensure a default task id for L2P/HiDe when not provided (first task defaults to 0)
+        if getattr(config, "peft_type", None) in (PeftType.L2P, PeftType.HIDE_PROMPT):
+            if getattr(config, "current_task_id", None) is None:
+                config.current_task_id = 0
         self.prompt_tokens[adapter_name] = torch.arange(
             config.num_virtual_tokens * config.num_transformer_submodules
         ).long()
@@ -875,10 +879,14 @@ class PeftModelForCausalLM(PeftModel):
 
             # Select prompts using mean-pooled features by default
             prompt_pool = self.prompt_encoder[self.active_adapter]
+            # Backfill task id: default to config.current_task_id (or 0)
+            _task_id = kwargs.pop("task_id", None)
+            if _task_id is None:
+                _task_id = getattr(self.active_peft_config, "current_task_id", getattr(self, "_current_task_id", 0))
             prompt_results = prompt_pool(
                 x_embed=inputs_embeds,
                 cls_features=None,
-                task_id=kwargs.pop("task_id", None),
+                task_id=_task_id,
                 train=self.training,
             )
             selected_prompts = prompt_results["selected_prompts"]  # (B, V, C)
@@ -1178,10 +1186,13 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 decoder_inputs_embeds = self.word_embeddings(decoder_input_ids)
 
             prompt_pool = self.prompt_encoder[self.active_adapter]
+            _task_id = kwargs.pop("task_id", None)
+            if _task_id is None:
+                _task_id = getattr(self.active_peft_config, "current_task_id", getattr(self, "_current_task_id", 0))
             prompt_results = prompt_pool(
                 x_embed=inputs_embeds,
                 cls_features=None,
-                task_id=kwargs.pop("task_id", None),
+                task_id=_task_id,
                 train=self.training,
             )
             selected_prompts = prompt_results["selected_prompts"].to(inputs_embeds.dtype)  # (B, P, C)
@@ -1231,7 +1242,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
             task_id = kwargs.pop("task_id", None)
             # Backfill defaults: enable mask by default and derive task_id from config/model if missing
             if task_id is None:
-                task_id = getattr(self.active_peft_config, "current_task_id", getattr(self, "_current_task_id", None))
+                task_id = getattr(self.active_peft_config, "current_task_id", getattr(self, "_current_task_id", 0))
             if use_prompt_mask is None:
                 use_prompt_mask = True if task_id is not None else False
             prompt_idx = kwargs.pop("prompt_idx", None)
@@ -1396,10 +1407,14 @@ class PeftModelForSeq2SeqLM(PeftModel):
         inputs_embeds = self.word_embeddings(input_ids)
         if peft_config.peft_type == PeftType.L2P:
             prompt_pool = self.prompt_encoder[self.active_adapter]
+            # Backfill task id for generation as well
+            _task_id = model_kwargs.pop("task_id", None)
+            if _task_id is None:
+                _task_id = getattr(self.active_peft_config, "current_task_id", getattr(self, "_current_task_id", 0))
             prompt_results = prompt_pool(
                 x_embed=inputs_embeds,
                 cls_features=None,
-                task_id=model_kwargs.pop("task_id", None),
+                task_id=_task_id,
                 train=self.training,
             )
             selected_prompts = prompt_results["selected_prompts"].to(inputs_embeds.dtype)
@@ -1410,7 +1425,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
             use_prompt_mask = model_kwargs.pop("use_prompt_mask", None)
             task_id = model_kwargs.pop("task_id", None)
             if task_id is None:
-                task_id = getattr(self.active_peft_config, "current_task_id", getattr(self, "_current_task_id", None))
+                task_id = getattr(self.active_peft_config, "current_task_id", getattr(self, "_current_task_id", 0))
             if use_prompt_mask is None:
                 use_prompt_mask = True if task_id is not None else False
             prompt_idx = model_kwargs.pop("prompt_idx", None)
