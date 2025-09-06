@@ -48,6 +48,52 @@ class DataCollatorForUIE:
         else:
             raise ValueError('Unsupport model {}!'.format(model_name))
 
+        # 为HiDe-Prompt添加task_id信息
+        model_inputs = self._add_task_id_for_hideprompt(model_inputs, batch)
+
+        return model_inputs
+
+    def _add_task_id_for_hideprompt(self, model_inputs, batch):
+        """为HiDe-Prompt添加task_id信息，基于当前训练的continual learning顺序"""
+        # 检查是否是HiDe-Prompt模型
+        from peft import PeftType
+        if (hasattr(self.model, 'peft_config') and 
+            self.model.peft_config and 
+            hasattr(list(self.model.peft_config.values())[0], 'peft_type') and
+            list(self.model.peft_config.values())[0].peft_type == PeftType.HIDE_PROMPT):
+            
+            # 获取当前任务的dataset信息
+            if batch and len(batch) > 0:
+                # 获取第一个样本的任务信息（假设batch中所有样本都是同一个任务）
+                first_sample = batch[0]
+                task_type = first_sample.get('Task', '')
+                dataset_name = first_sample.get('Dataset', '')
+                
+                # 从模型配置中获取当前的task_id（由训练脚本设置）
+                from peft.utils.save_and_load import get_hide_prompt_task_id
+                try:
+                    current_task_id = get_hide_prompt_task_id(self.model)
+                    
+                    # 创建prompt_idx用于指定使用的prompt
+                    if 'input_ids' in model_inputs:
+                        batch_size = model_inputs['input_ids'].shape[0]
+                        device = model_inputs['input_ids'].device
+                        
+                        # 使用当前的task_id创建prompt_idx
+                        # top_k默认为5，这里创建一个[batch_size, top_k]的tensor
+                        top_k = 5  # 可以从配置中获取
+                        prompt_idx = torch.full((batch_size, top_k), current_task_id, 
+                                              dtype=torch.long, device=device)
+                        
+                        model_inputs['prompt_idx'] = prompt_idx
+                        
+                        # 记录日志用于调试
+                        logger.debug(f"Added prompt_idx for HiDe-Prompt: task_id={current_task_id}, "
+                                   f"task_type={task_type}, dataset={dataset_name}")
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to add task_id for HiDe-Prompt: {e}")
+        
         return model_inputs
 
     def get_instruction(self, instance):

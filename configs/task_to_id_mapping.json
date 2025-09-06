@@ -1,0 +1,9 @@
+{
+  "description": "Task ID mapping for continual learning - task_id is determined by execution order",
+  "note": "For continual learning, task_id is based on the sequence order (0, 1, 2, 3, ...) not fixed task type",
+  "examples": {
+    "order1": ["amazon(0)", "agnews(1)", "yahoo(2)", "dbpedia(3)"],
+    "order2": ["amazon(0)", "agnews(1)", "yahoo(2)", "dbpedia(3)"], 
+    "order3": ["dbpedia(0)", "yahoo(1)", "agnews(2)", "amazon(3)"]
+  }
+}

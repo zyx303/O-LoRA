@@ -466,10 +466,24 @@ def main():
             json.dump(training_args.to_dict(), f, indent=4)
     model.resize_token_embeddings(len(tokenizer))
 
-    # If using HiDe-Prompt and a task id is specified, set it early for forward/generation
+    # If using HiDe-Prompt, set task_id based on continual learning order
     try:
-        if model_args.peft_type.upper() == "HIDE_PROMPT" and training_args.hide_task_id is not None:
-            set_hide_prompt_task_id(model, int(training_args.hide_task_id))
+        if model_args.peft_type.upper() == "HIDE_PROMPT":
+            if training_args.hide_task_id is not None:
+                # 使用命令行指定的task_id
+                task_id = int(training_args.hide_task_id)
+            else:
+                # 从配置目录自动推断task_id
+                from task_mapping import get_task_order_from_config
+                task_id = get_task_order_from_config(data_args.task_config_dir)
+                if task_id is None:
+                    task_id = 0  # 默认值
+                    logger.warning(f"Could not determine task_id from config, using default: {task_id}")
+                else:
+                    logger.info(f"Auto-determined task_id from config: {task_id}")
+            
+            set_hide_prompt_task_id(model, task_id)
+            logger.info(f"Set HiDe-Prompt task_id to: {task_id}")
     except Exception as _e:
         logger.warning(f"Failed to set HiDe task id pre-training: {_e}")
 
