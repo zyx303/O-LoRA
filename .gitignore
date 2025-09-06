@@ -1,9 +1,0 @@
-*/__pycache__/
-.vscode/
-./analyze/
-*.log 
-*.csv
-*.png
-*.md
-*.assets/
-hide_source/*
