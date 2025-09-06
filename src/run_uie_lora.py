@@ -451,11 +451,15 @@ def main():
                 engine=model_args.l2p_engine,
             )
         elif model_args.peft_type.upper() == "HIDE_PROMPT":
+            print(f"Using HiDe-Prompt with {model_args.num_virtual_tokens} virtual tokens.")
             peft_config = HidePromptConfig(
                 num_virtual_tokens=model_args.num_virtual_tokens,
                 task_type=TaskType.SEQ_2_SEQ_LM,
                 inference_mode=False,
-                prompt_key=False
+                prompt_key=False,
+                pool_size=100,  # 明确设置prompt pool大小
+                top_k=1,       # 明确设置top_k
+                use_prefix_tune_for_e_prompt=True,  # 确保使用prefix tuning
             )
         else:
             peft_config = LoraConfig(
@@ -529,6 +533,32 @@ def main():
                 frozen_params += param.numel()
         
         print(f"L2P Parameter Summary:")
+        print(f"  Trainable parameters: {trainable_params:,}")
+        print(f"  Frozen parameters: {frozen_params:,}")
+        print(f"  Trainable percentage: {100 * trainable_params / (trainable_params + frozen_params):.2f}%")
+
+    # HiDe-Prompt specific parameter freezing
+    if model_args.peft_type.upper() == "HIDE_PROMPT":
+        print("Applying HiDe-Prompt parameter freezing...")
+        trainable_params = 0
+        frozen_params = 0
+        
+        for name, param in model.named_parameters():
+            # Only allow HiDe-Prompt prompt pool and prompt key parameters to be trainable
+            if any(key in name for key in ["prompt", "prompt_key"]):
+                param.requires_grad = True
+                trainable_params += param.numel()
+                print(f"  Trainable: {name} ({param.numel()} params)")
+            # Also allow classification head to be trainable if it exists
+            elif any(key in name for key in ["classifier", "lm_head", "score"]):
+                param.requires_grad = True
+                trainable_params += param.numel()
+                print(f"  Trainable: {name} ({param.numel()} params)")
+            else:
+                param.requires_grad = False
+                frozen_params += param.numel()
+        
+        print(f"HiDe-Prompt Parameter Summary:")
         print(f"  Trainable parameters: {trainable_params:,}")
         print(f"  Frozen parameters: {frozen_params:,}")
         print(f"  Trainable percentage: {100 * trainable_params / (trainable_params + frozen_params):.2f}%")

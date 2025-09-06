@@ -76,8 +76,8 @@ class DataCollatorForUIE:
                     # HiDe-Prompt会自动根据current_task_id生成prompt_mask
                     # 我们只需要确保task_id已经正确设置即可
                     # 记录日志用于调试
-                    logger.debug(f"HiDe-Prompt using task_id={current_task_id} for "
-                               f"task_type={task_type}, dataset={dataset_name}")
+                    logger.info(f"HiDe-Prompt using task_id={current_task_id} for "
+                            f"task_type={task_type}, dataset={dataset_name}")
                         
                 except Exception as e:
                     logger.warning(f"Failed to get task_id for HiDe-Prompt: {e}")
