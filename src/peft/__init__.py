@@ -47,6 +47,8 @@ from .tuners import (
     L2PPromptPool,
     L2PConfig,
     L2PInit,
+    HidePromptConfig,
+    hide_prompt
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
