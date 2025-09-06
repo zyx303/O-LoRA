@@ -288,24 +288,25 @@ def get_task_order_from_config(task_config_dir: str) -> Optional[int]:
                 order_num = order_info.lower().replace('order', '').replace('_configs', '')
                 
                 # 根据数据集名称和order确定在continual learning序列中的位置
+                # 基于图中实际的执行顺序进行映射
                 task_order_map = {
-                    # Order 1 sequence
-                    ('1', 'amazon'): 0,
-                    ('1', 'agnews'): 1, 
-                    ('1', 'yahoo'): 2,
-                    ('1', 'dbpedia'): 3,
+                    # Order 1 sequence: dbpedia → amazon → yahoo → ag(agnews)
+                    ('1', 'dbpedia'): 0,  # 第1个任务
+                    ('1', 'amazon'): 1,   # 第2个任务
+                    ('1', 'yahoo'): 2,    # 第3个任务
+                    ('1', 'agnews'): 3,   # 第4个任务
                     
-                    # Order 2 sequence  
-                    ('2', 'amazon'): 0,
-                    ('2', 'agnews'): 1,
-                    ('2', 'yahoo'): 2, 
-                    ('2', 'dbpedia'): 3,
+                    # Order 2 sequence: dbpedia → amazon → ag(agnews) → yahoo
+                    ('2', 'dbpedia'): 0,  # 第1个任务
+                    ('2', 'amazon'): 1,   # 第2个任务
+                    ('2', 'agnews'): 2,   # 第3个任务
+                    ('2', 'yahoo'): 3,    # 第4个任务
                     
-                    # Order 3 sequence
-                    ('3', 'dbpedia'): 0,
-                    ('3', 'yahoo'): 1,
-                    ('3', 'agnews'): 2,
-                    ('3', 'amazon'): 3,
+                    # Order 3 sequence: yahoo → amazon → ag(agnews) → dbpedia
+                    ('3', 'yahoo'): 0,    # 第1个任务
+                    ('3', 'amazon'): 1,   # 第2个任务
+                    ('3', 'agnews'): 2,   # 第3个任务
+                    ('3', 'dbpedia'): 3,  # 第4个任务
                 }
                 
                 return task_order_map.get((order_num, dataset_name), 0)
@@ -337,10 +338,33 @@ if __name__ == "__main__":
     # 测试任务顺序获取
     print("\n测试任务顺序获取:")
     test_configs = [
-        "configs/order1_configs/amazon",
-        "configs/order2_configs/dbpedia", 
-        "configs/order3_configs/yahoo"
+        # Order 1 tests: dbpedia → amazon → yahoo → agnews
+        "configs/order1_configs/dbpedia",   # 应该是 0
+        "configs/order1_configs/amazon",    # 应该是 1
+        "configs/order1_configs/yahoo",     # 应该是 2
+        "configs/order1_configs/agnews",    # 应该是 3
+        
+        # Order 2 tests: dbpedia → amazon → agnews → yahoo
+        "configs/order2_configs/dbpedia",   # 应该是 0
+        "configs/order2_configs/amazon",    # 应该是 1
+        "configs/order2_configs/agnews",    # 应该是 2
+        "configs/order2_configs/yahoo",     # 应该是 3
+        
+        # Order 3 tests: yahoo → amazon → agnews → dbpedia
+        "configs/order3_configs/yahoo",     # 应该是 0
+        "configs/order3_configs/amazon",    # 应该是 1
+        "configs/order3_configs/agnews",    # 应该是 2
+        "configs/order3_configs/dbpedia",   # 应该是 3
     ]
     for config_path in test_configs:
         order_id = get_task_order_from_config(config_path)
-        print(f"  {config_path} -> order_id: {order_id}")
+        expected_msg = ""
+        if "order1" in config_path and "dbpedia" in config_path:
+            expected_msg = " (期望: 0 - order1第1个任务)"
+        elif "order1" in config_path and "amazon" in config_path:
+            expected_msg = " (期望: 1 - order1第2个任务)"
+        elif "order3" in config_path and "yahoo" in config_path:
+            expected_msg = " (期望: 0 - order3第1个任务)"
+        elif "order3" in config_path and "dbpedia" in config_path:
+            expected_msg = " (期望: 3 - order3第4个任务)"
+        print(f"  {config_path} -> task_id: {order_id}{expected_msg}")

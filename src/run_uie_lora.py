@@ -478,12 +478,12 @@ def main():
                 task_id = get_task_order_from_config(data_args.task_config_dir)
                 if task_id is None:
                     task_id = 0  # 默认值
-                    logger.warning(f"Could not determine task_id from config, using default: {task_id}")
+                    logger.warning(f"Could not determine task_id from config '{data_args.task_config_dir}', using default: {task_id}")
                 else:
-                    logger.info(f"Auto-determined task_id from config: {task_id}")
+                    logger.info(f"Auto-determined task_id from config '{data_args.task_config_dir}': {task_id}")
             
             set_hide_prompt_task_id(model, task_id)
-            logger.info(f"Set HiDe-Prompt task_id to: {task_id}")
+            logger.info(f"Successfully set HiDe-Prompt task_id to: {task_id} (config: {data_args.task_config_dir})")
     except Exception as _e:
         logger.warning(f"Failed to set HiDe task id pre-training: {_e}")
 

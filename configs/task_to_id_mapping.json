@@ -1,9 +1,27 @@
 {
   "description": "Task ID mapping for continual learning - task_id is determined by execution order",
-  "note": "For continual learning, task_id is based on the sequence order (0, 1, 2, 3, ...) not fixed task type",
-  "examples": {
-    "order1": ["amazon(0)", "agnews(1)", "yahoo(2)", "dbpedia(3)"],
-    "order2": ["amazon(0)", "agnews(1)", "yahoo(2)", "dbpedia(3)"], 
-    "order3": ["dbpedia(0)", "yahoo(1)", "agnews(2)", "amazon(3)"]
+  "note": "For continual learning, task_id is based on the sequence order (0, 1, 2, 3, ...) starting from 0",
+  "execution_sequences": {
+    "order1": {
+      "sequence": ["dbpedia", "amazon", "yahoo", "agnews"],
+      "task_ids": [0, 1, 2, 3],
+      "description": "T5/LLaMA: dbpedia → amazon → yahoo → ag"
+    },
+    "order2": {
+      "sequence": ["dbpedia", "amazon", "agnews", "yahoo"],
+      "task_ids": [0, 1, 2, 3],
+      "description": "T5/LLaMA: dbpedia → amazon → ag → yahoo"
+    },
+    "order3": {
+      "sequence": ["yahoo", "amazon", "agnews", "dbpedia"],
+      "task_ids": [0, 1, 2, 3],
+      "description": "T5/LLaMA: yahoo → amazon → ag → dbpedia"
+    }
+  },
+  "mapping_examples": {
+    "order1_dbpedia": "task_id = 0 (first task)",
+    "order1_amazon": "task_id = 1 (second task)",
+    "order2_agnews": "task_id = 2 (third task in order2)",
+    "order3_yahoo": "task_id = 0 (first task in order3)"
   }
 }
