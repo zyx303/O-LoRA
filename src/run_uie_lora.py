@@ -17,7 +17,8 @@
 Fine-tuning the library models for sequence to sequence.
 """
 # You can also adapt this script on your own sequence to sequence task. Pointers for this are left as comments.
-
+import math
+from copy import deepcopy
 import logging
 import os
 import sys
@@ -29,6 +30,8 @@ import datasets
 import nltk  # Here to have a nice missing dependency error message early on
 import numpy as np
 from datasets import load_dataset
+import torch
+from peft.tuners.inflora import LoraLayer as InfLoraLayer
 
 import transformers
 from filelock import FileLock
@@ -270,6 +273,7 @@ class UIETrainingArguments(Seq2SeqTrainingArguments):
     prompt_momentum: float = field(default=0.0, metadata={"help": "Momentum for post-task HiDe prompt update [0-1]"})
 
 
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -502,7 +506,13 @@ def main():
     # (constrained in "training_step"[uie_trainer_lora.py])
     for name, param in model.named_parameters():
         if name.find("loranew_") != -1:
-            param.requires_grad = True
+            # for Inflora, only train loranew_B
+            if model_args.peft_type.upper() == "INFLORA" and name.find("loranew_B") != -1:
+                param.requires_grad = True
+            elif model_args.peft_type.upper() == "INFLORA" and name.find("loranew_A") != -1:
+                param.requires_grad = False
+            else:
+                param.requires_grad = True
         elif name.find("lora_") != -1:
             param.requires_grad = False
         # this module should always be frozen because we change the vocabulary
@@ -673,8 +683,73 @@ def main():
             checkpoint = training_args.resume_from_checkpoint
         elif last_checkpoint is not None:
             checkpoint = last_checkpoint
+        if model_args.peft_type.upper() == "INFLORA":
+
+            # get current feature matrix
+            trainer.args.get_cur_feat = True
+            with torch.no_grad():
+                trainer.train(resume_from_checkpoint=checkpoint)
+            trainer.args.get_cur_feat = False
+            
+            # InfLoraModel
+            base = trainer.model.module if hasattr(trainer.model, "module") else trainer.model
+            # set loranew_A 
+            for module in base.modules():
+                # task == 0 
+                if 'adapter' not in model_args.model_name_or_path:
+                    if isinstance(module, InfLoraLayer):
+                        adapter = getattr(module, "active_adapter", "default")
+                        cur_matrix = module.cur_matrix
+                        U, S, V = torch.linalg.svd(cur_matrix)
+                        module.loranew_A[adapter].weight.data.copy_(U[:,:module.r].T/math.sqrt(3))
+                        module.cur_matrix.zero_()
+                        module.n_cur_matrix = 0
+                # task >= 1
+                else:
+                    kk = 0
+                    for module in base.modules():
+                        if isinstance(module, InfLoraLayer):
+                            adapter = getattr(module, "active_adapter", "default")
+                            cur_matrix = module.cur_matrix
+                            if base.project_type[kk] == 'remove':
+                                cur_matrix = cur_matrix - torch.mm(base.feature_mat[kk],cur_matrix)
+                            else:
+                                assert base.project_type[kk] == 'retain'
+                                cur_matrix = torch.mm(base.feature_mat[kk],cur_matrix)
+                            cU, cS, cV = torch.linalg.svd(cur_matrix, full_matrices=False)
+                            module.loranew_A[adapter].weight.data.copy_(cU[:,:module.rank].T/math.sqrt(3))
+                            module.cur_matrix.zero_()
+                            module.n_cur_matrix = 0
+                            kk += 1
+                        
+
+            
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
 
+        if model_args.peft_type.upper() == "INFLORA":
+            base = trainer.model.module if hasattr(trainer.model, "module") else trainer.model
+            with torch.no_grad():
+                # get current feature matrix
+                trainer.args.get_cur_feat = True
+                with torch.no_grad():
+                    trainer.train(resume_from_checkpoint=checkpoint)
+                trainer.args.get_cur_feat = False    
+
+                mat_list = []
+                for module in base.modules():
+                    if isinstance(module, InfLoraLayer):
+                        mat_list.append(deepcopy(module.cur_matrix))
+                        module.cur_matrix.zero_()
+                        module.n_cur_matrix = 0
+                # self.update_GPM(mat_list)
+                base.update_DualGPM(mat_list)
+
+                # Projection Matrix Precomputation
+                base.feature_mat = []
+                for p in range(len(base.feature_list)):
+                    Uf=torch.Tensor(np.dot(base.feature_list[p],base.feature_list[p].transpose()))
+                    print('Layer {} - Projection Matrix shape: {}'.format(p+1,Uf.shape))
+                    base.feature_mat.append(Uf)
         # For HiDe-Prompt: apply momentum update on e_prompt after finishing this task, then save
         try:
             if model_args.peft_type.upper() == "HIDE_PROMPT":

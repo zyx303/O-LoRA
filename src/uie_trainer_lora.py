@@ -6,6 +6,7 @@ from transformers.trainer_callback import TrainerCallback
 
 from uie_collator import SUPPORTED_DECODER_MODELS, check_model
 from uie_dataset_lora import ANSWER_PREFIX
+from peft.tuners.inflora import LoraLayer as InfLoraLayer
 
 from peft import PeftType
 
@@ -79,7 +80,18 @@ class UIETrainer(Seq2SeqTrainer):
         if is_sagemaker_mp_enabled():
             loss_mb = smp_forward_backward(model, inputs, self.args.gradient_accumulation_steps)
             return loss_mb.reduce_mean().detach().to(self.args.device)
-
+        if (getattr(self.args, "get_cur_feat", False) or getattr(self.args, "get_feat", False)) and getattr(self.args, "peft_type", "").upper() == "INFLORA":
+            model.eval()
+            base = self.model.module if hasattr(self.model, "module") else self.model
+            for m in base.modules():
+                if isinstance(m, InfLoraLayer) :
+                    m.get_feat = getattr(self.args, "get_feat", False)
+                    m.get_cur_feat = getattr(self.args, "get_cur_feat", False)
+                    # print(f"Set {name} get_feat to {module.get_feat}, get_cur_feat to {module.get_cur_feat}")
+            with torch.no_grad():
+                _ = model(**inputs)  # get matrix
+            return torch.zeros([], device=self.args.device, dtype=torch.float32)
+        
         with self.compute_loss_context_manager():
             loss,outputs = self.compute_loss(model, inputs,return_outputs=True)
 

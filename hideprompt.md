@@ -1,3 +1,4 @@
+
 1. 训练的参数是ψ（lm_head), prompt
 2. default是只启用e_prompt（vit的**前5个layer**, 用prefix，train和infer都是)：
    
