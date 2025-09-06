@@ -519,7 +519,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
         for k, v in peft_model_state_dict.items():
             f.write(f"{k}: {v}\n")
     model.load_state_dict(peft_model_state_dict, strict=False)
-    if isinstance(config, PromptLearningConfig) and config.peft_type != PeftType.L2P:
+    if isinstance(config, PromptLearningConfig) and config.peft_type not in [PeftType.L2P, PeftType.HIDE_PROMPT]:
          model.prompt_encoder[adapter_name].embedding.load_state_dict(
              {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
          )
