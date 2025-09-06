@@ -9,3 +9,6 @@ __pycache__/
 hide_source/*
 logs_and_outputs_llama/*
 logs_and_outputs/*
+*.pdf
+!readme.md
+!hideprompt.md
