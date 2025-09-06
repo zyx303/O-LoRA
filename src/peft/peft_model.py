@@ -1259,7 +1259,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
             #   kv_target=1 => decoder self-attn (pack[2:4])
             kv_target = int(kwargs.pop("kv_target", 1))
 
-            if use_prompt_mask and self.training and task_id is not None and prompt_mask is None:
+            if use_prompt_mask and task_id is not None and prompt_mask is None:
                 start = task_id * eprompt.top_k
                 end = (task_id + 1) * eprompt.top_k
                 if end <= eprompt.pool_size:
