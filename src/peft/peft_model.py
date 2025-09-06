@@ -1257,9 +1257,9 @@ class PeftModelForSeq2SeqLM(PeftModel):
             # Example for seq2seq (num_transformer_submodules==2):
             #   kv_target=0 => encoder self-attn (pack[0:2])
             #   kv_target=1 => decoder self-attn (pack[2:4])
-            kv_target = int(kwargs.pop("kv_target", 0))
+            kv_target = int(kwargs.pop("kv_target", 1))
 
-            if use_prompt_mask and self.training and task_id is not None and prompt_mask is None:
+            if use_prompt_mask and task_id is not None and prompt_mask is None:
                 start = task_id * eprompt.top_k
                 end = (task_id + 1) * eprompt.top_k
                 if end <= eprompt.pool_size:
@@ -1495,7 +1495,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
             prompt_mask = model_kwargs.pop("prompt_mask", None)
             # 控制注入到哪个注意力子模块（pair）以及哪些层
             prefix_layers = model_kwargs.pop("prefix_layers", None)
-            kv_target = int(model_kwargs.pop("kv_target", 0))
+            kv_target = int(model_kwargs.pop("kv_target", 1))
             if use_prompt_mask and task_id is not None and prompt_mask is None:
                 start = task_id * eprompt.top_k
                 end = (task_id + 1) * eprompt.top_k
