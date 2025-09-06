@@ -360,17 +360,12 @@ class UIETrainer(Seq2SeqTrainer):
         else:
             generation_inputs = inputs[self.model.main_input_name]
 
-        # 为HiDe-Prompt在生成时添加task_id信息
-        generation_kwargs = {
-            "input_ids": generation_inputs,
-            "generation_config": generation_config
-        }
-        
-        # 如果输入中包含prompt_idx，传递给generate方法
-        if "prompt_idx" in inputs:
-            generation_kwargs["prompt_idx"] = inputs["prompt_idx"]
-        
-        generated_tokens = self.model.generate(**generation_kwargs)
+        # 为HiDe-Prompt在生成时添加task_id信息  
+        # 注意：不能直接传递prompt_idx给generate，需要通过forward过程处理
+        generated_tokens = self.model.generate(
+            input_ids=generation_inputs, 
+            generation_config=generation_config
+        )
 
         bs, source_len = inputs['input_ids'].shape
         # in case the batch is shorter than max length, the output should be padded
