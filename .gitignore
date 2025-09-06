@@ -1,0 +1,11 @@
+__pycache__/
+.vscode/
+./analyze/
+*.log 
+*.csv
+*.png
+*.md
+*.assets/
+hide_source/*
+logs_and_outputs_llama/*
+logs_and_outputs/*
