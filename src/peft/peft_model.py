@@ -37,6 +37,7 @@ from .tuners import (
     PromptEmbedding,
     PromptEncoder,
     L2PPromptPool,
+    InfLoraModel
 )
 from .tuners.hide_prompt import EPrompt as HiDeEPrompt
 from .utils import (
@@ -63,6 +64,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.ADALORA: AdaLoraModel,
     PeftType.ADAPTION_PROMPT: AdaptionPromptModel,
     PeftType.L2P: L2PPromptPool,
+    PeftType.INFLORA: InfLoraModel
 }
 
 

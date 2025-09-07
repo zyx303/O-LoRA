@@ -89,7 +89,7 @@ class InfLoRAConfig(PeftConfig):
     save_loranew: bool = field(default=False) # modified. This arguments represents whether modules named of 'loranew_A/B' are saved independently, rather than being combined with "lora_A/B".  
 
     def __post_init__(self):
-        self.peft_type = PeftType.LORA
+        self.peft_type = PeftType.INFLORA
 
 
 class InfLoraModel(torch.nn.Module):
@@ -159,7 +159,7 @@ class InfLoraModel(torch.nn.Module):
         self.lame = 1
         self.lamb = 0.95
         self._cur_task = 0
-        self.total_sessions = 10
+        self.total_sessions = 4
         self.feature_list = []
         self.add_adapter(adapter_name, self.peft_config[adapter_name])
 
@@ -169,7 +169,7 @@ class InfLoraModel(torch.nn.Module):
         if len(self.feature_list) == 0:
             # After First Task 
             for i in range(len(mat_list)):
-                activation = mat_list[i]
+                activation = mat_list[i].cpu()
                 U,S,Vh = np.linalg.svd(activation, full_matrices=False)
                 # criteria (Eq-5)
                 sval_total = (S**2).sum()
@@ -184,7 +184,7 @@ class InfLoraModel(torch.nn.Module):
         else:
             for i in range(len(mat_list)):
                 if self.project_type[i] == 'remove':
-                    activation = mat_list[i]
+                    activation = mat_list[i].cpu()
                     U1,S1,Vh1=np.linalg.svd(activation, full_matrices=False)
                     sval_total = (S1**2).sum()
                     # Projected Representation (Eq-8)
@@ -213,7 +213,7 @@ class InfLoraModel(torch.nn.Module):
                         self.feature_list[i]=Ui
                 else:
                     assert self.project_type[i] == 'retain'
-                    activation = mat_list[i]
+                    activation = mat_list[i].cpu()
                     U1,S1,Vh1=np.linalg.svd(activation, full_matrices=False)
                     sval_total = (S1**2).sum()
                     # Projected Representation (Eq-8)
@@ -680,14 +680,18 @@ class Linear(nn.Linear, LoraLayer):
             self.merged = False
 
     def forward(self, x: torch.Tensor): # modified
+        previous_dtype = x.dtype
+
         if getattr(self, "get_feat", False):
-            self.matrix = (self.matrix*self.n_matrix + torch.bmm(x.detach().permute(0, 2, 1), x.detach()).sum(dim=0).cpu())/(self.n_matrix + x.shape[0]*x.shape[1])
+            self.matrix = (self.matrix*self.n_matrix + torch.bmm(x.detach().permute(0, 2, 1), x.detach()).sum(dim=0))/(self.n_matrix + x.shape[0]*x.shape[1])
             self.n_matrix += x.shape[0]*x.shape[1]
         if getattr(self, "get_cur_feat", False):
-            self.cur_matrix = (self.cur_matrix*self.n_cur_matrix + torch.bmm(x.detach().permute(0, 2, 1), x.detach()).sum(dim=0).cpu())/(self.n_cur_matrix + x.shape[0]*x.shape[1])
+            # print('x:',x.detach().device)
+            # print('self.cur_matrix:',self.cur_matrix.device)
+            self.cur_matrix = self.cur_matrix.to(x.device)
+            self.cur_matrix = (self.cur_matrix*self.n_cur_matrix + torch.bmm(x.detach().permute(0, 2, 1), x.detach()).sum(dim=0))/(self.n_cur_matrix + x.shape[0]*x.shape[1])
             self.n_cur_matrix += x.shape[0]*x.shape[1]
 
-        previous_dtype = x.dtype
 
         if self.active_adapter not in self.lora_A.keys():
             return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)

@@ -15,6 +15,9 @@
 
 from .config import PeftType, PromptLearningConfig
 import torch
+from typing import Any, Dict
+import numpy as np
+from peft.tuners.inflora import LoraLayer as InfLoraLayer
 
 
 def set_l2p_task_id(model, task_id, adapter_name="default"):
@@ -164,7 +167,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
                             break # target modules have been matched
 
                 
-    if config.peft_type in (PeftType.LORA, PeftType.ADALORA, PeftType.SDLORA):
+    if config.peft_type in (PeftType.LORA, PeftType.ADALORA, PeftType.SDLORA,PeftType.INFLORA):
         # to_return = lora_state_dict(model, bias=model.peft_config.bias)
         # adapted from `https://github.com/microsoft/LoRA/blob/main/loralib/utils.py`
         # to be used directly with the state dict which is necessary when using DeepSpeed or FSDP
@@ -213,6 +216,43 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
                 rank_pattern = {k.replace(f".{adapter_name}", ""): v for k, v in rank_pattern.items()}
                 config.rank_pattern = rank_pattern
                 to_return = model.resize_state_dict_by_rank_pattern(rank_pattern, to_return, adapter_name)
+
+        # ---- InfLoRA: persist continual-learning state (best-effort) ----
+        if config.peft_type == PeftType.INFLORA:
+            inf_state: Dict[str, Any] = {}
+            # feature_list / feature_mat
+            feat_list = []
+            for item in getattr(model, "feature_list"):
+                #store as tensor, load as nparray
+                t = item
+                if not torch.is_tensor(t):
+                    t = torch.as_tensor(t)
+                feat_list.append(t.detach().cpu())
+            inf_state["feature_list"] = feat_list
+                
+            feat_mat = []
+            for item in getattr(model, "feature_mat"):
+                t = item
+                if not torch.is_tensor(t):
+                    t = torch.as_tensor(t)
+                feat_mat.append(t.detach().cpu())
+            inf_state["feature_mat"] = feat_mat
+
+            inf_state["project_type"] = model.project_type
+
+            # Per-layer matrices by module dotted path
+            per_layer: Dict[str, Dict[str, Any]] = {}
+            for name, module in model.named_modules():
+                if isinstance(module, InfLoraLayer):
+                    layer_state: Dict[str, Any] = {
+                        "matrix": (module.matrix.detach().cpu() if torch.is_tensor(module.matrix) else torch.as_tensor(module.matrix)),
+                        "n_matrix": int(module.n_matrix),
+                        "cur_matrix": (module.cur_matrix.detach().cpu() if torch.is_tensor(module.cur_matrix) else torch.as_tensor(module.cur_matrix)),
+                        "n_cur_matrix": int(module.n_cur_matrix),
+                    }
+                    per_layer[name] = layer_state
+            inf_state["per_layer"] = per_layer
+            to_return["inflora_state"] = inf_state
 
     elif config.peft_type == PeftType.ADAPTION_PROMPT:
         to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
@@ -372,7 +412,39 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                                 requires_grad=False
                             )
 
-    if config.peft_type in (PeftType.LORA, PeftType.ADALORA, PeftType.SDLORA):
+    if config.peft_type in (PeftType.LORA, PeftType.ADALORA, PeftType.SDLORA, PeftType.INFLORA):
+        # ---- InfLoRA: restore continual-learning state prior to weight loading ----
+        if config.peft_type == PeftType.INFLORA and "inflora_state" in state_dict:
+            inf_state = state_dict.get("inflora_state", {})
+            if isinstance(inf_state, dict):
+                # feature_list / feature_mat
+                if "feature_list" in inf_state:
+                    #store as tensor, load as nparray
+                    fl = [t if not torch.is_tensor(t) else np.asarray(t.cpu()) for t in inf_state["feature_list"]]
+                    model.base_model.feature_list = fl
+                if "feature_mat" in inf_state:
+                    fm = [t if torch.is_tensor(t) else torch.as_tensor(t) for t in inf_state["feature_mat"]]
+                    model.base_model.feature_mat = fm
+                if "project_type" in inf_state:
+                    model.base_model.project_type = list(inf_state["project_type"])
+                # Per-layer
+                if "per_layer" in inf_state and isinstance(inf_state["per_layer"], dict):
+                    for layer_path, lstate in inf_state["per_layer"].items():
+                        obj = model
+                        for part in layer_path.split("."):
+                            if not part:
+                                continue
+                            obj = getattr(obj, part)
+                        if hasattr(obj, "matrix") and "matrix" in lstate:
+                            val = lstate["matrix"]
+                            setattr(obj, "matrix", val if torch.is_tensor(val) else torch.as_tensor(val))
+                        if hasattr(obj, "n_matrix") and "n_matrix" in lstate:
+                            setattr(obj, "n_matrix", int(lstate["n_matrix"]))
+                        if hasattr(obj, "cur_matrix") and "cur_matrix" in lstate:
+                            val = lstate["cur_matrix"]
+                            setattr(obj, "cur_matrix", val if torch.is_tensor(val) else torch.as_tensor(val))
+                        if hasattr(obj, "n_cur_matrix") and "n_cur_matrix" in lstate:
+                            setattr(obj, "n_cur_matrix", int(lstate["n_cur_matrix"]))
         peft_model_state_dict = {}
         for k, v in state_dict.items():
             if "lora_" in k:
@@ -393,6 +465,9 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                 else:
                     k = f"{k}.{adapter_name}"
                 peft_model_state_dict[k] = v
+            elif k == "inflora_state":
+                # Already restored above; skip passing to load_state_dict
+                continue
             # For SDLoRA: handle historical_directions, historical_scalings, and num_historical_directions
             elif "historical_directions" in k or "historical_scalings" in k or "num_historical_directions" in k:
                 k = k.replace("historical_directions", f"historical_directions.{adapter_name}")
@@ -424,7 +499,6 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                 with torch.no_grad():
                     l2p.prompt_key.data.copy_(state_dict["prompt_key"].to(l2p.prompt_key.dtype))
             
-            # 实现PILOT式的任务迁移逻辑
             if "l2p_meta" in state_dict:
                 l2p_meta = state_dict["l2p_meta"]
                 prev_task_id = l2p_meta.get("task_id", 0)

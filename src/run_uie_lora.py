@@ -51,6 +51,7 @@ from peft import SDLoraConfig  # new
 from peft import L2PConfig  # new
 from peft import PeftType  # new
 from peft import HidePromptConfig  # new
+from peft import InfLoRAConfig
 from peft.utils.save_and_load import (
     set_hide_prompt_task_id,
     get_hide_prompt_task_id,
@@ -307,6 +308,13 @@ def main():
     )
     logger.info(f"Training/evaluation parameters {training_args}")
 
+    
+    # get task id 
+    import re, os
+    m = re.match(r"^(\d+)-", os.path.basename(os.path.normpath(training_args.output_dir)))
+    task_id = int(m.group(1)) if m else None
+    print('task_id：', task_id)
+
     # Detecting last checkpoint.
     last_checkpoint = None
     if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
@@ -465,6 +473,14 @@ def main():
                 top_k=1,       # 明确设置top_k
                 use_prefix_tune_for_e_prompt=True,  # 确保使用prefix tuning
             )
+        elif model_args.peft_type.upper() == "INFLORA":
+            peft_config = InfLoRAConfig(
+                task_type=TaskType.SEQ_2_SEQ_LM,
+                inference_mode=False,
+                r=model_args.lora_dim,
+                lora_alpha=32,
+                lora_dropout=0.1
+            )
         else:
             peft_config = LoraConfig(
                 task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=model_args.lora_dim, lora_alpha=32, lora_dropout=0.1
@@ -475,25 +491,25 @@ def main():
     model.resize_token_embeddings(len(tokenizer))
 
     # If using HiDe-Prompt, set task_id based on continual learning order
-    try:
-        if model_args.peft_type.upper() == "HIDE_PROMPT":
-            if training_args.hide_task_id is not None:
-                # 使用命令行指定的task_id
-                task_id = int(training_args.hide_task_id)
-            else:
-                # 从配置目录自动推断task_id
-                from task_mapping import get_task_order_from_config
-                task_id = get_task_order_from_config(data_args.task_config_dir)
-                if task_id is None:
-                    task_id = 0  # 默认值
-                    logger.warning(f"Could not determine task_id from config '{data_args.task_config_dir}', using default: {task_id}")
-                else:
-                    logger.info(f"Auto-determined task_id from config '{data_args.task_config_dir}': {task_id}")
+    # try:
+    #     if model_args.peft_type.upper() == "HIDE_PROMPT":
+    #         if training_args.hide_task_id is not None:
+    #             # 使用命令行指定的task_id
+    #             task_id = int(training_args.hide_task_id)
+    #         else:
+    #             # 从配置目录自动推断task_id
+    #             from task_mapping import get_task_order_from_config
+    #             task_id = get_task_order_from_config(data_args.task_config_dir)
+    #             if task_id is None:
+    #                 task_id = 0  # 默认值
+    #                 logger.warning(f"Could not determine task_id from config '{data_args.task_config_dir}', using default: {task_id}")
+    #             else:
+    #                 logger.info(f"Auto-determined task_id from config '{data_args.task_config_dir}': {task_id}")
             
-            set_hide_prompt_task_id(model, task_id)
-            logger.info(f"Successfully set HiDe-Prompt task_id to: {task_id} (config: {data_args.task_config_dir})")
-    except Exception as _e:
-        logger.warning(f"Failed to set HiDe task id pre-training: {_e}")
+    #         set_hide_prompt_task_id(model, task_id)
+    #         logger.info(f"Successfully set HiDe-Prompt task_id to: {task_id} (config: {data_args.task_config_dir})")
+    # except Exception as _e:
+    #     logger.warning(f"Failed to set HiDe task id pre-training: {_e}")
 
     if 'llama' in model_args.model_name_or_path.lower():
         model.generation_config.bos_token_id = 1
@@ -684,57 +700,74 @@ def main():
         elif last_checkpoint is not None:
             checkpoint = last_checkpoint
         if model_args.peft_type.upper() == "INFLORA":
-
+            trainer.model.base_model._cur_task = task_id-1
             # get current feature matrix
+            base = trainer.model.base_model
             trainer.args.get_cur_feat = True
-            with torch.no_grad():
-                trainer.train(resume_from_checkpoint=checkpoint)
+            for m in base.modules():
+                if isinstance(m, InfLoraLayer) :
+                    # m.get_feat = getattr(trainer.args, "get_feat", False)
+                    m.get_cur_feat = True
+                    # print(f"Set {name} get_feat to {module.get_feat}, get_cur_feat to {module.get_cur_feat}")
+            trainer.train(resume_from_checkpoint=checkpoint)
+            for m in base.modules():
+                if isinstance(m, InfLoraLayer) :
+                    # m.get_feat = getattr(trainer.args, "get_feat", False)
+                    m.get_cur_feat = False
             trainer.args.get_cur_feat = False
             
             # InfLoraModel
-            base = trainer.model.module if hasattr(trainer.model, "module") else trainer.model
+            print("Initialize loranew_A with SVD of current collected gradients")
+            base = trainer.model.base_model
             # set loranew_A 
-            for module in base.modules():
-                # task == 0 
-                if 'adapter' not in model_args.model_name_or_path:
+            # task == 0 
+            if 'adapter' not in model_args.model_name_or_path:
+                for module in base.modules():
                     if isinstance(module, InfLoraLayer):
                         adapter = getattr(module, "active_adapter", "default")
                         cur_matrix = module.cur_matrix
                         U, S, V = torch.linalg.svd(cur_matrix)
-                        module.loranew_A[adapter].weight.data.copy_(U[:,:module.r].T/math.sqrt(3))
+                        module.loranew_A[adapter].weight.data.copy_(U[:,:module.r[adapter]].T/math.sqrt(3))
                         module.cur_matrix.zero_()
                         module.n_cur_matrix = 0
-                # task >= 1
-                else:
-                    kk = 0
-                    for module in base.modules():
-                        if isinstance(module, InfLoraLayer):
-                            adapter = getattr(module, "active_adapter", "default")
-                            cur_matrix = module.cur_matrix
-                            if base.project_type[kk] == 'remove':
-                                cur_matrix = cur_matrix - torch.mm(base.feature_mat[kk],cur_matrix)
-                            else:
-                                assert base.project_type[kk] == 'retain'
-                                cur_matrix = torch.mm(base.feature_mat[kk],cur_matrix)
-                            cU, cS, cV = torch.linalg.svd(cur_matrix, full_matrices=False)
-                            module.loranew_A[adapter].weight.data.copy_(cU[:,:module.rank].T/math.sqrt(3))
-                            module.cur_matrix.zero_()
-                            module.n_cur_matrix = 0
-                            kk += 1
+            # task >= 1
+            else:
+                kk = 0
+                for module in base.modules():
+                    if isinstance(module, InfLoraLayer):
+                        adapter = getattr(module, "active_adapter", "default")
+                        cur_matrix = module.cur_matrix.to(base.feature_mat[kk].device)
+                        if base.project_type[kk] == 'remove':
+                            cur_matrix = cur_matrix - torch.mm(base.feature_mat[kk],cur_matrix)
+                        else:
+                            assert base.project_type[kk] == 'retain'
+                            cur_matrix = torch.mm(base.feature_mat[kk],cur_matrix)
+                        cU, cS, cV = torch.linalg.svd(cur_matrix, full_matrices=False)
+                        module.loranew_A[adapter].weight.data.copy_(cU[:,:module.r[adapter]].T/math.sqrt(3))
+                        module.cur_matrix.zero_()
+                        module.n_cur_matrix = 0
+                        kk += 1
+            print("Initialization done!")
                         
 
-            
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
 
         if model_args.peft_type.upper() == "INFLORA":
-            base = trainer.model.module if hasattr(trainer.model, "module") else trainer.model
+            print("getting feature directions for task ", task_id-1)
+            base = trainer.model.base_model
+            # get current feature matrix
+            trainer.args.get_cur_feat = True
+            for m in base.modules():
+                if isinstance(m, InfLoraLayer) :
+                    # m.get_feat = getattr(trainer.args, "get_feat", False)
+                    m.get_cur_feat = True
+            trainer.train(resume_from_checkpoint=checkpoint)
+            for m in base.modules():
+                if isinstance(m, InfLoraLayer) :
+                    # m.get_feat = getattr(trainer.args, "get_feat", False)
+                    m.get_cur_feat = False
+            trainer.args.get_cur_feat = False   
             with torch.no_grad():
-                # get current feature matrix
-                trainer.args.get_cur_feat = True
-                with torch.no_grad():
-                    trainer.train(resume_from_checkpoint=checkpoint)
-                trainer.args.get_cur_feat = False    
-
                 mat_list = []
                 for module in base.modules():
                     if isinstance(module, InfLoraLayer):
@@ -748,8 +781,10 @@ def main():
                 base.feature_mat = []
                 for p in range(len(base.feature_list)):
                     Uf=torch.Tensor(np.dot(base.feature_list[p],base.feature_list[p].transpose()))
-                    print('Layer {} - Projection Matrix shape: {}'.format(p+1,Uf.shape))
+                    # print('Layer {} - Projection Matrix shape: {}'.format(p+1,Uf.shape))
                     base.feature_mat.append(Uf)
+            print("Feature directions for task ", task_id-1, " stored!")
+
         # For HiDe-Prompt: apply momentum update on e_prompt after finishing this task, then save
         try:
             if model_args.peft_type.upper() == "HIDE_PROMPT":
