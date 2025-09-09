@@ -427,6 +427,14 @@ def main():
                 lora_dropout=0.1,
                 save_loranew=True,
             )
+        elif model_args.peft_type.upper() == "INFLORA":
+            peft_config = InfLoRAConfig(
+                task_type=TaskType.CAUSAL_LM,
+                inference_mode=False,
+                r=model_args.lora_dim,
+                lora_alpha=32,
+                lora_dropout=0.1
+            )
         else:
             peft_config = LoraConfig(
                 task_type=TaskType.CAUSAL_LM, inference_mode=False, r=model_args.lora_dim, lora_alpha=32, lora_dropout=0.1
@@ -702,6 +710,7 @@ def main():
         if model_args.peft_type.upper() == "INFLORA":
             trainer.model.base_model._cur_task = task_id-1
             # get current feature matrix
+            print('----------------------------first run----------------------------')
             base = trainer.model.base_model
             trainer.args.get_cur_feat = True
             for m in base.modules():

@@ -165,6 +165,7 @@ class InfLoraModel(torch.nn.Module):
 
     def update_DualGPM (self, mat_list):
         threshold = (self.lame - self.lamb)*self._cur_task/self.total_sessions + self.lamb
+        # threshold = 0.9
         print ('Threshold: ', threshold) 
         if len(self.feature_list) == 0:
             # After First Task 
@@ -174,6 +175,7 @@ class InfLoraModel(torch.nn.Module):
                 # criteria (Eq-5)
                 sval_total = (S**2).sum()
                 sval_ratio = (S**2)/sval_total
+                # print('Layer {} - Singular Value Ratio: {}'.format(i+1, np.cumsum(sval_ratio)))
                 r = np.sum(np.cumsum(sval_ratio)<threshold) #+1  
                 if r < (activation.shape[0]/2):
                     self.feature_list.append(U[:,0:max(r,1)])
@@ -240,21 +242,21 @@ class InfLoraModel(torch.nn.Module):
                     Ui, Si, Vi = np.linalg.svd(act_feature)
                     self.feature_list[i]=Ui[:,:self.feature_list[i].shape[1]-r]
 
-        print('-'*40)
-        print('Gradient Constraints Summary')
-        print('-'*40)
-        for i in range(len(self.feature_list)):
-            if self.project_type[i]=='remove' and (self.feature_list[i].shape[1] > (self.feature_list[i].shape[0]/2)):
-                feature = self.feature_list[i]
-                # ipdb.set_trace()
-                U, S, V = np.linalg.svd(feature)
-                new_feature = U[:,feature.shape[1]:]
-                self.feature_list[i] = new_feature
-                self.project_type[i] = 'retain'
-            elif self.project_type[i]=='retain':
-                assert self.feature_list[i].shape[1] <= (self.feature_list[i].shape[0]/2)
-            print ('Layer {} : {}/{} type {}'.format(i+1,self.feature_list[i].shape[1], self.feature_list[i].shape[0], self.project_type[i]))
-        print('-'*40)
+        # print('-'*40)
+        # print('Gradient Constraints Summary')
+        # print('-'*40)
+        # for i in range(len(self.feature_list)):
+        #     if self.project_type[i]=='remove' and (self.feature_list[i].shape[1] > (self.feature_list[i].shape[0]/2)):
+        #         feature = self.feature_list[i]
+        #         # ipdb.set_trace()
+        #         U, S, V = np.linalg.svd(feature)
+        #         new_feature = U[:,feature.shape[1]:]
+        #         self.feature_list[i] = new_feature
+        #         self.project_type[i] = 'retain'
+        #     elif self.project_type[i]=='retain':
+        #         assert self.feature_list[i].shape[1] <= (self.feature_list[i].shape[0]/2)
+        #     print ('Layer {} : {}/{} type {}'.format(i+1,self.feature_list[i].shape[1], self.feature_list[i].shape[0], self.project_type[i]))
+        # print('-'*40)
 
     def add_adapter(self, adapter_name, config=None):
         if config is not None:
