@@ -75,12 +75,12 @@ def write_csv(rows: List[Dict], out_csv: str):
             })
 
 import debugpy
-# debugpy.listen(5678)
-# debugpy.wait_for_client()
+debugpy.listen(5678)
+debugpy.wait_for_client()
 def main():
     parser = argparse.ArgumentParser(description="Analyze SDLoRA historical_scalings across tasks")
     parser.add_argument("--adapter-dirs", nargs="*", default=[], help="List of adapter directories to analyze, in task order")
-    parser.add_argument("--root", default="logs_and_outputs/sdlora/order_1/outputs", help="Root to auto discover if adapter-dirs empty")
+    parser.add_argument("--root", default="exp/sdlora/order_1/outputs", help="Root to auto discover if adapter-dirs empty")
     parser.add_argument("--match", default="adapter", help="Substring to match when discovering adapter dirs")
     parser.add_argument("--adapter-name", default="default", help="Adapter name used when saving")
     parser.add_argument("--out-csv", default="analyze/sdlora.csv", help="Output CSV path")
@@ -124,7 +124,9 @@ def main():
             return
 
         # 按 (task, direction) 聚合，得到每个方向在各任务的平均 scaling（跨层平均）
-        pivot_dir = df.groupby(["task", "direction"])["value"].mean().reset_index()
+        pivot_dir = df.groupby(["task", "direction"])["value"]
+
+        pivot_dir = pivot_dir.mean().reset_index()
 
         # 对 direction 按数字排序（dir_0, dir_1, ...），若无法解析数字则按字典序
         def _dir_key(s: str):

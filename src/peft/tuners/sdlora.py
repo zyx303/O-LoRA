@@ -340,7 +340,7 @@ class LoraLayer:
     def __init__(self, in_features: int, out_features: int):
         self.r = {}
         self.lora_alpha = {}
-        self.scaling = {}
+        self.scaling = nn.ParameterDict({})
         self.lora_dropout = nn.ModuleDict({})
         # 当前任务的LoRA参数
         self.loranew_A = nn.ModuleDict({})
@@ -394,7 +394,7 @@ class LoraLayer:
                 self.lora_B.update(nn.ModuleDict({adapter_name: nn.Linear(0, self.out_features, bias=False)}))
             
             # self.scaling[adapter_name] = lora_alpha / r if r > 0 else 1.0
-            self.scaling[adapter_name] = 0.8
+            self.scaling[adapter_name] = nn.Parameter(torch.Tensor([0.8]), requires_grad=True)
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
         self.to(self.weight.device)
@@ -434,7 +434,7 @@ class LoraLayer:
         self.historical_directions[adapter_name].update(nn.ModuleDict({direction_name: direction_module}))
         
         # 添加可训练的scaling参数
-        scaling_param = nn.Parameter(torch.tensor(initial_scaling * torch.norm(direction_module['A'].weight) * torch.norm(direction_module['B'].weight), dtype=direction_A.dtype, device=direction_A.device))
+        scaling_param = nn.Parameter(torch.tensor(initial_scaling * torch.norm(direction_module['A'].weight.detach()) * torch.norm(direction_module['B'].weight.detach()), dtype=direction_A.dtype, device=direction_A.device))
         self.historical_scalings[adapter_name].update(nn.ParameterDict({direction_name: scaling_param}))
         
         # 更新历史方向数量

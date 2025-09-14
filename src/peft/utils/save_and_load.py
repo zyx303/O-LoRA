@@ -403,7 +403,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                             current_module.historical_directions[adapter_key][direction_key] = direction_module
                             
                             # Create placeholder scaling parameter
-                            scaling_param = torch.nn.Parameter(torch.tensor(1.0, dtype=A_weight.dtype))
+                            scaling_param = torch.nn.Parameter(torch.tensor(2.0, dtype=A_weight.dtype))
                             current_module.historical_scalings[adapter_key][direction_key] = scaling_param
 
                             new_num_directions = max(current_module.num_historical_directions[adapter_key], int(direction_key.split('_')[1]) + 1)
@@ -473,6 +473,11 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                 k = k.replace("historical_directions", f"historical_directions.{adapter_name}")
                 k = k.replace("historical_scalings", f"historical_scalings.{adapter_name}")
                 # k = k.replace("num_historical_directions", f"num_historical_directions.{adapter_name}")
+
+                # 重置historical_scalings
+                if "historical_scalings" in k:
+                    peft_model_state_dict[k] = torch.tensor(0.8,device=v.device,dtype=v.dtype)
+                    continue
                 peft_model_state_dict[k] = v
             else:
                 peft_model_state_dict[k] = v
@@ -592,6 +597,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
     with open("peft_model_state_dict_debug.log","w") as f:
         for k, v in peft_model_state_dict.items():
             f.write(f"{k}: {v}\n")
+        
     model.load_state_dict(peft_model_state_dict, strict=False)
     if isinstance(config, PromptLearningConfig) and config.peft_type not in [PeftType.L2P, PeftType.HIDE_PROMPT]:
          model.prompt_encoder[adapter_name].embedding.load_state_dict(
