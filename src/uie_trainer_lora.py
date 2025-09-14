@@ -1,8 +1,25 @@
 import torch
+import numpy as np
+from typing import Any, Dict, List, Optional, Tuple, Union
+from torch.utils.data import DataLoader
 from transformers import GenerationConfig
 from transformers.trainer_seq2seq import Seq2SeqTrainer
 from transformers.trainer import *
 from transformers.trainer_callback import TrainerCallback
+from transformers.trainer_utils import (
+    EvalLoopOutput,
+    denumpify_detensorize,
+    has_length,
+    find_batch_size,
+    nested_concat,
+    nested_numpify,
+    nested_truncate,
+    IterableDatasetShard,
+    is_deepspeed_zero3_enabled,
+)
+from transformers.training_args import IntervalStrategy
+
+amp = None
 
 from uie_collator import SUPPORTED_DECODER_MODELS, check_model
 from uie_dataset_lora import ANSWER_PREFIX
@@ -54,6 +71,54 @@ class DenserEvalCallback(TrainerCallback):
 
 
 class UIETrainer(Seq2SeqTrainer):
+
+    def create_optimizer(self):
+        """Only customize optimizer for SDLORA; otherwise use parent implementation."""
+        if self.optimizer is not None:
+            return
+
+        is_sdlora = str(getattr(self.model, "peft_type", "")).upper() == "SDLORA"
+        if not is_sdlora:
+            # Fallback to HF default behavior for non-SDLORA
+            return super().create_optimizer()
+
+        # Respect HF's optimizer selection and kwargs
+        optimizer_cls, optimizer_kwargs = Trainer.get_optimizer_cls_and_kwargs(self.args)
+
+        no_decay = ["bias", "LayerNorm.weight"]
+        lr = self.args.learning_rate
+        wd = self.args.weight_decay
+        lr_mult = float(getattr(self.args, "historical_scalings_lr_mult", 1.0))
+
+        named_params = list(self.model.named_parameters())
+
+        def is_no_decay(n: str) -> bool:
+            return any(nd in n for nd in no_decay)
+
+        # Special groups for 'historical_scalings'
+        hist_decay = [p for n, p in named_params if p.requires_grad and "historical_scalings" in n and not is_no_decay(n)]
+        hist_no_decay = [p for n, p in named_params if p.requires_grad and "historical_scalings" in n and is_no_decay(n)]
+
+        # Other parameters
+        other_decay = [p for n, p in named_params if p.requires_grad and "historical_scalings" not in n and not is_no_decay(n)]
+        other_no_decay = [p for n, p in named_params if p.requires_grad and "historical_scalings" not in n and is_no_decay(n)]
+
+        param_groups = []
+        if hist_decay:
+            param_groups.append({"params": hist_decay, "weight_decay": wd, "lr": lr * lr_mult})
+        if hist_no_decay:
+            param_groups.append({"params": hist_no_decay, "weight_decay": 0.0, "lr": lr * lr_mult})
+        if other_decay:
+            param_groups.append({"params": other_decay, "weight_decay": wd, "lr": lr})
+        if other_no_decay:
+            param_groups.append({"params": other_no_decay, "weight_decay": 0.0, "lr": lr})
+
+        # Fallback in case something goes wrong
+        if not param_groups:
+            param_groups = [{"params": [p for _, p in named_params if p.requires_grad], "weight_decay": wd, "lr": lr}]
+
+        self.optimizer = optimizer_cls(param_groups, **optimizer_kwargs)
+        return self.optimizer
 
 
     def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
