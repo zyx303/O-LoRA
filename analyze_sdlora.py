@@ -1,205 +1,147 @@
 
-import math
-from copy import deepcopy
+import argparse
+import csv
 import logging
 import os
-import sys
-import json
-import time
-from dataclasses import dataclass, field
-from typing import Optional
-import datasets
-import nltk  # Here to have a nice missing dependency error message early on
-import numpy as np
-from datasets import load_dataset
+from typing import Dict, List, Tuple
+
 import torch
-from src.peft.tuners.inflora import LoraLayer as InfLoraLayer
-
-import transformers
-from filelock import FileLock
-from transformers import (
-    AutoConfig,
-    AutoModel,
-    AutoModelForSeq2SeqLM,
-    AutoModelForCausalLM,  # add
-    AutoTokenizer,
-    HfArgumentParser,
-    Seq2SeqTrainingArguments,
-    set_seed, )
-from transformers.file_utils import is_offline_mode
-from transformers.trainer_utils import get_last_checkpoint
-from src.peft import get_peft_config, get_peft_model, LoraConfig, TaskType, PeftModel, PeftConfig  # add
-from src.peft import SDLoraConfig  # new
-from src.peft import L2PConfig  # new
-from src.peft import PeftType  # new
-from src.peft import HidePromptConfig  # new
-from src.peft import InfLoRAConfig
-from src.peft.utils.save_and_load import (
-    set_hide_prompt_task_id,
-    get_hide_prompt_task_id,
-    update_hide_prompt_after_task,
-)
-from src.uie_collator import DataCollatorForUIE
-from src.uie_dataset_lora import gen_cache_path
-
-from src.uie_trainer_lora import UIETrainer, DenserEvalCallback, skip_instructions
-from src.compute_metrics import compute_metrics, compute_grouped_metrics
-from src.model.llama import LlamaForCausalLM_with_lossmask
-
-# off wandb
-os.environ['WANDB_DISABLED'] = "True"
-# os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-logger = logging.getLogger(__name__)
-CURRENT_DIR = os.path.dirname(__file__)
 
 
-@dataclass
-class ModelArguments:
-    """
-    Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
-    """
-
-    model_name_or_path: str = field(
-        metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
-    )
-    config_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
-    )
-    tokenizer_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
-    )
-    cache_dir: Optional[str] = field(
-        default=None,
-        metadata={"help": "Where to store the pretrained models downloaded from huggingface.co"},
-    )
-    use_fast_tokenizer: bool = field(
-        default=True,
-        metadata={"help": "Whether to use one of the fast tokenizer (backed by the tokenizers library) or not."},
-    )
-    model_revision: str = field(
-        default="main",
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
-    )
-    use_auth_token: bool = field(
-        default=False,
-        metadata={
-            "help": "Will use the token generated when running `transformers-cli login` (necessary to use this script "
-                    "with private models)."
-        },
-    )
-    resize_position_embeddings: Optional[bool] = field(
-        default=None,
-        metadata={
-            "help": "Whether to automatically resize the position embeddings if `max_source_length` exceeds "
-                    "the model's position embeddings."
-        },
-    )
-    # added for AutoCL
-    lora_dim: Optional[int] = field(
-        default=8,
-        metadata={
-            "help": "Intrinsic dimension of the latent space."
-        },
-    )
-    peft_type: Optional[str] = field(
-        default="LORA",
-        metadata={"help": "PEFT adapter type: LORA or SDLORA"},
-    )
-    num_virtual_tokens: Optional[int] = field(
-        default=20,
-        metadata={"help": "The number of virtual tokens to use for the task."}
-    )
+def find_adapter_file(adapter_dir: str) -> Tuple[str]:
+    pt = os.path.join(adapter_dir, "adapter_model.bin")
+    if os.path.exists(pt):
+        return pt
+    raise FileNotFoundError(f"adapter weights not found in {adapter_dir}")
 
 
-#load 
-if 'adapter' in model_args.model_name_or_path: # add lora-adapter to the original model
-    model = model_class.from_pretrained(config.base_model_name_or_path)
-    model = PeftModel.from_pretrained(model, model_args.model_name_or_path)
-elif 'llama' in model_args.model_name_or_path.lower():
-    model = model_class.from_pretrained(
-        model_args.model_name_or_path,
-        from_tf=bool(".ckpt" in model_args.model_name_or_path),
-        config=config,
-        cache_dir=model_args.cache_dir,
-        revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None
-    )
-    if model_args.peft_type.upper() == "SDLORA":
-        peft_config = SDLoraConfig(
-            task_type=TaskType.CAUSAL_LM,
-            inference_mode=False,
-            r=model_args.lora_dim,
-            lora_alpha=32,
-            lora_dropout=0.1,
-            save_loranew=True,
-        )
-    elif model_args.peft_type.upper() == "INFLORA":
-        peft_config = InfLoRAConfig(
-            task_type=TaskType.CAUSAL_LM,
-            inference_mode=False,
-            r=model_args.lora_dim,
-            lora_alpha=32,
-            lora_dropout=0.1
-        )
-    else:
-        peft_config = LoraConfig(
-            task_type=TaskType.CAUSAL_LM, inference_mode=False, r=model_args.lora_dim, lora_alpha=32, lora_dropout=0.1
-        )
-    model = get_peft_model(model, peft_config)
-else:
-    model = model_class.from_pretrained(
-        model_args.model_name_or_path,
-        from_tf=bool(".ckpt" in model_args.model_name_or_path),
-        config=config,
-        cache_dir=model_args.cache_dir,
-        revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
-    )
-    if model_args.peft_type.upper() == "SDLORA":
-        peft_config = SDLoraConfig(
-            task_type=TaskType.SEQ_2_SEQ_LM,
-            inference_mode=False,
-            r=model_args.lora_dim,
-            lora_alpha=32,
-            lora_dropout=0.1,
-            save_loranew=True,
-        )
-    elif model_args.peft_type.upper() == "L2P":
-        print(f"Using L2P with {model_args.num_virtual_tokens} virtual tokens.")
-        peft_config = L2PConfig(
-            num_virtual_tokens=model_args.num_virtual_tokens,
-            task_type=TaskType.SEQ_2_SEQ_LM,
-            inference_mode=False,
-            pool_size=training_args.pool_size,
-            top_k=training_args.l2p_top_k,
-            pull_constraint=training_args.pull_constraint,
-            pull_constraint_coeff=training_args.pull_constraint_coeff,
-            engine=model_args.l2p_engine,
-        )
-    elif model_args.peft_type.upper() == "HIDE_PROMPT":
-        print(f"Using HiDe-Prompt with {model_args.num_virtual_tokens} virtual tokens.")
-        peft_config = HidePromptConfig(
-            num_virtual_tokens=model_args.num_virtual_tokens,
-            task_type=TaskType.SEQ_2_SEQ_LM,
-            inference_mode=False,
-            prompt_key=False,
-            pool_size=100,  # 明确设置prompt pool大小
-            top_k=1,       # 明确设置top_k
-            use_prefix_tune_for_e_prompt=True,  # 确保使用prefix tuning
-        )
-    elif model_args.peft_type.upper() == "INFLORA":
-        peft_config = InfLoRAConfig(
-            task_type=TaskType.SEQ_2_SEQ_LM,
-            inference_mode=False,
-            r=model_args.lora_dim,
-            lora_alpha=32,
-            lora_dropout=0.1
-        )
-    else:
-        peft_config = LoraConfig(
-            task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=model_args.lora_dim, lora_alpha=32, lora_dropout=0.1
-        )
-    model = get_peft_model(model, peft_config)
-    with open(os.path.join(training_args.output_dir, "config.json"), "w") as f:
-        json.dump(training_args.to_dict(), f, indent=4)
-model.resize_token_embeddings(len(tokenizer))
+def load_state_dict(adapter_dir: str) -> Dict:
+    path = adapter_dir+'/adapter_model.bin'
+    # torch.load can read safetensors via safe_open? For simplicity rely on safetensors when present using safetensors lib.
+    return torch.load(path, map_location="cpu", weights_only=True)
+
+
+def parse_scalings(sd: Dict, adapter_name: str = "default") -> List[Dict]:
+    """Extract historical_scalings entries to a list of rows: {layer, direction, task, value}."""
+    rows: List[Dict] = []
+    for k, v in sd.items():
+        if "historical_scalings" not in k:
+            continue
+        # expected patterns like: ...historical_scalings.default.dir_0
+        parts = k.split("historical_scalings.")
+        if len(parts) < 2:
+            continue
+        right = parts[1]  # e.g., "default.dir_0"
+        seg = right.split(".")
+        if len(seg) < 2:
+            continue
+        adapter = seg[0]
+        if adapter_name and adapter != adapter_name:
+            continue
+        dir_key = seg[1]  # dir_0
+        try:
+            task = int(dir_key.split("_")[1])
+        except Exception:
+            task = None
+        layer = parts[0].rstrip(".")  # dotted layer path before historical_scalings
+        try:
+            val = float(v.item() if hasattr(v, "item") else float(v))
+        except Exception:
+            # if it's a tensor parameter
+            try:
+                val = float(getattr(v, "data", v))
+            except Exception:
+                continue
+        rows.append({"layer": layer, "direction": dir_key, "task": task, "value": val})
+    return rows
+
+
+def auto_discover(root: str, pattern: str) -> List[str]:
+    dirs = [f.name for f in os.scandir(root) if f.is_dir() and pattern in f.name]
+    dirs = [os.path.join(root, d,'adapter') for d in sorted(dirs)]
+    return dirs
+
+
+def write_csv(rows: List[Dict], out_csv: str):
+    os.makedirs(os.path.dirname(out_csv), exist_ok=True)
+    with open(out_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["task", "layer", "direction", "value"]) 
+        writer.writeheader()
+        for r in rows:
+            writer.writerow({
+                "task": r.get("task"),
+                "layer": r.get("layer"),
+                "direction": r.get("direction"),
+                "value": r.get("value"),
+            })
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Analyze SDLoRA historical_scalings across tasks")
+    parser.add_argument("--adapter-dirs", nargs="*", default=[], help="List of adapter directories to analyze, in task order")
+    parser.add_argument("--root", default="logs_and_outputs/sdlora/order_1", help="Root to auto discover if adapter-dirs empty")
+    parser.add_argument("--match", default="adapter", help="Substring to match when discovering adapter dirs")
+    parser.add_argument("--adapter-name", default="default", help="Adapter name used when saving")
+    parser.add_argument("--out-csv", default="analyze/acc_T5_sdora.csv", help="Output CSV path")
+    parser.add_argument("--plot", action="store_true", help="Plot per-layer average scaling over tasks")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(message)s")
+    log = logging.getLogger("analyze_sdlora")
+
+    adapter_dirs: List[str] = args.adapter_dirs
+    if not adapter_dirs:
+        adapter_dirs = auto_discover(args.root, args.match)
+        log.info(f"Discovered {len(adapter_dirs)} adapter dirs")
+    if not adapter_dirs:
+        log.error("No adapter directories found")
+        return
+
+    all_rows: List[Dict] = []
+    for idx, d in enumerate(adapter_dirs):
+        sd = load_state_dict(d)
+        rows = parse_scalings(sd, adapter_name=args.adapter_name)
+        # 若 state_dict 未显式包含任务号，从目录顺序补齐
+        for r in rows:
+            if r.get("task") is None:
+                r["task"] = idx
+        all_rows.extend(rows)
+
+    if not all_rows:
+        log.warning("No historical_scalings found in provided adapters")
+    write_csv(all_rows, args.out_csv)
+    log.info(f"Wrote CSV: {args.out_csv} with {len(all_rows)} rows")
+
+    if args.plot:
+        try:
+            import pandas as pd
+            import matplotlib.pyplot as plt
+        except Exception:
+            log.warning("pandas/matplotlib not available; skip plotting")
+            return
+        df = pd.DataFrame(all_rows)
+        if df.empty:
+            log.warning("Empty data; skip plotting")
+            return
+        # 每层按任务的平均 scaling
+        pivot = df.groupby(["task", "layer"])['value'].mean().reset_index()
+        layers = sorted(pivot['layer'].unique())
+        plt.figure(figsize=(10, max(4, len(layers) * 0.3)))
+        for layer in layers:
+            dfl = pivot[pivot['layer'] == layer].sort_values('task')
+            plt.plot(dfl['task'], dfl['value'], label=layer)
+        plt.xlabel('Task')
+        plt.ylabel('Average historical scaling')
+        plt.title('SDLoRA historical_scalings over tasks')
+        plt.legend(fontsize=7, ncol=2)
+        out_png = os.path.splitext(args.out_csv)[0] + ".png"
+        os.makedirs(os.path.dirname(out_png), exist_ok=True)
+        plt.tight_layout()
+        plt.savefig(out_png, dpi=150)
+        log.info(f"Saved plot: {out_png}")
+
+
+if __name__ == "__main__":
+    main()
+
+
