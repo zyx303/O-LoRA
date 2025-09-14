@@ -307,10 +307,11 @@ class SDLoraModel(torch.nn.Module):
                 if adapter_name in module.loranew_A and adapter_name in module.lora_A:
                     current_A = module.loranew_A[adapter_name].weight.detach().clone()
                     current_B = module.loranew_B[adapter_name].weight.detach().clone()
+                    initial_scaling = module.scaling[adapter_name]
                     
                     # Add current directions as a new historical direction
-                    module.add_historical_direction(adapter_name, current_A, current_B)
-                    
+                    module.add_historical_direction(adapter_name, current_A, current_B, initial_scaling)
+
                     # Reset current task's LoRA for next task
                     with torch.no_grad():
                         module.loranew_A[adapter_name].weight.zero_()
@@ -433,7 +434,7 @@ class LoraLayer:
         self.historical_directions[adapter_name].update(nn.ModuleDict({direction_name: direction_module}))
         
         # 添加可训练的scaling参数
-        scaling_param = nn.Parameter(torch.tensor(initial_scaling, dtype=direction_A.dtype, device=direction_A.device))
+        scaling_param = nn.Parameter(torch.tensor(initial_scaling * torch.norm(direction_module['A'].weight) * torch.norm(direction_module['B'].weight), dtype=direction_A.dtype, device=direction_A.device))
         self.historical_scalings[adapter_name].update(nn.ParameterDict({direction_name: scaling_param}))
         
         # 更新历史方向数量
@@ -581,8 +582,8 @@ class Linear(nn.Linear, LoraLayer):
                         # print(f"historical_B:{historical_B.weight.device}  {historical_B.weight.dtype}")
                         # print(f"x_lora:{x_lora.device}  {x_lora.dtype}")
                         # print('='*40)
-
-                        historical_output = historical_B(historical_A(x_lora))
+                        
+                        historical_output = historical_B(historical_A(x_lora)) /(torch.norm(historical_A.weight) * torch.norm(historical_B.weight))
                         result = result + historical_output * self.historical_scalings[self.active_adapter][direction_key]
 
             # Current task LoRA: α_t A_t B_t  
