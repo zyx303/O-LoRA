@@ -110,31 +110,58 @@ def main():
     log.info(f"Wrote CSV: {args.out_csv} with {len(all_rows)} rows")
 
     if args.plot:
-        try:
-            import pandas as pd
-            import matplotlib.pyplot as plt
-        except Exception:
-            log.warning("pandas/matplotlib not available; skip plotting")
-            return
+        import pandas as pd
+        import matplotlib.pyplot as plt
+        import re
+
         df = pd.DataFrame(all_rows)
         if df.empty:
             log.warning("Empty data; skip plotting")
             return
-        # 每层按任务的平均 scaling
-        pivot = df.groupby(["task", "layer"])['value'].mean().reset_index()
-        layers = sorted(pivot['layer'].unique())
-        plt.figure(figsize=(10, max(4, len(layers) * 0.3)))
-        for layer in layers:
-            dfl = pivot[pivot['layer'] == layer].sort_values('task')
-            plt.plot(dfl['task'], dfl['value'], label=layer)
-        plt.xlabel('Task')
-        plt.ylabel('Average historical scaling')
-        plt.title('SDLoRA historical_scalings over tasks')
-        plt.legend(fontsize=7, ncol=2)
-        out_png = os.path.splitext(args.out_csv)[0] + ".png"
+
+        # 按 (task, direction) 聚合，得到每个方向在各任务的平均 scaling（跨层平均）
+        pivot_dir = df.groupby(["task", "direction"])["value"].mean().reset_index()
+
+        # 对 direction 按数字排序（dir_0, dir_1, ...），若无法解析数字则按字典序
+        def _dir_key(s: str):
+            m = re.search(r"(\d+)", str(s))
+            return (0, int(m.group(1))) if m else (1, str(s))
+        directions = sorted(pivot_dir["direction"].dropna().unique().tolist(), key=_dir_key)
+
+        # 任务范围与刻度（以 1 起始的可读标签）
+        tasks_sorted = sorted(pivot_dir["task"].dropna().astype(int).unique().tolist())
+        if not tasks_sorted:
+            log.warning("No tasks found after grouping; skip plotting")
+            return
+
+        plt.figure(figsize=(10, 6))
+        for dkey in directions:
+            dfd = pivot_dir[pivot_dir["direction"] == dkey].copy()
+            if dfd.empty:
+                continue
+            dfd["task"] = dfd["task"].astype(int)
+            dfd = dfd.sort_values("task")
+            plt.plot(
+                dfd["task"],
+                dfd["value"],
+                marker="o",
+                linestyle="-",
+                linewidth=2,
+                markersize=6,
+                label=str(dkey),
+            )
+
+        plt.xlabel("Completed Tasks", fontsize=12)
+        plt.ylabel("Historical scaling (avg over layers)", fontsize=12)
+        plt.title("SD-LoRA: historical_scalings by direction (dir_i) over tasks", fontsize=14)
+        # x 轴刻度与标签（Task 从 1 开始展示）
+        plt.xticks(tasks_sorted, [f"Task {t+1}" for t in tasks_sorted])
+        plt.grid(True, alpha=0.3)
+        plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=9)
+        out_png = os.path.splitext(args.out_csv)[0] + "_dirs.png"
         os.makedirs(os.path.dirname(out_png), exist_ok=True)
         plt.tight_layout()
-        plt.savefig(out_png, dpi=150)
+        plt.savefig(out_png, dpi=150, bbox_inches="tight")
         log.info(f"Saved plot: {out_png}")
 
 
