@@ -420,7 +420,7 @@ class LoraLayer:
             initial_scalings = {}
             for i in range(5):  # 5个方向
                 direction_key = f"dir_{i}"
-                initial_scalings[direction_key] = nn.Parameter(torch.tensor(0.8, dtype=torch.float32), requires_grad=True)
+                initial_scalings[direction_key] = nn.Parameter(torch.tensor([0.8], dtype=torch.float32), requires_grad=True)
             self.historical_scalings.update(nn.ParameterDict({adapter_name: nn.ParameterDict(initial_scalings)}))
             self.num_historical_directions[adapter_name] = nn.Parameter(torch.tensor(0, dtype=torch.long), requires_grad=False)
         
@@ -445,10 +445,10 @@ class LoraLayer:
         self.historical_directions[adapter_name].update(nn.ModuleDict({direction_name: direction_module}))
         
         # scaling参数已经在初始化时创建，这里只需要确保direction_name在范围内
-        if direction_name in self.historical_scalings[adapter_name]:
-            print(f"Using pre-initialized scaling parameter for {direction_name}")
-        else:
-            print(f"Warning: {direction_name} not found in pre-initialized scaling parameters")
+        # if direction_name in self.historical_scalings[adapter_name]:
+        #     print(f"Using pre-initialized scaling parameter for {direction_name}")
+        # else:
+        #     print(f"Warning: {direction_name} not found in pre-initialized scaling parameters")
         
         # 更新历史方向数量
         self.num_historical_directions[adapter_name].data = torch.tensor(direction_idx + 1, dtype=torch.long, device=direction_A.device)
@@ -595,9 +595,10 @@ class Linear(nn.Linear, LoraLayer):
                         # print(f"historical_B:{historical_B.weight.device}  {historical_B.weight.dtype}")
                         # print(f"x_lora:{x_lora.device}  {x_lora.dtype}")
                         # print('='*40)
-                        norm_factor = torch.norm(historical_A.weight) * torch.norm(historical_B.weight)
-                        historical_output = historical_B(historical_A(x_lora)) /(norm_factor + 1e-8)
-                        result = result + historical_output * self.historical_scalings[self.active_adapter][direction_key]
+                        with torch.no_grad():
+                            norm_factor = torch.norm(historical_A.weight) * torch.norm(historical_B.weight)
+                        historical_output = historical_B(historical_A(x_lora)) /(norm_factor + 1e-8)* self.historical_scalings[self.active_adapter][direction_key]
+                        result = result + historical_output 
 
             # Current task LoRA: α_t A_t B_t  
             # This implements the current task term from equation (4)

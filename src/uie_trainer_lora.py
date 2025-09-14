@@ -142,25 +142,24 @@ class UIETrainer(Seq2SeqTrainer):
         else:
             loss.backward()
 
-        # 检查historical_scalings的梯度
-        for name, param in model.named_parameters():
-            if "historical_scalings" in name and param.requires_grad:
-                if param.grad is not None:
-                    print(f"Grad for {name}: {param.grad.norm().item()}")
-                else:
-                    print(f"No grad for {name}")
+        # # 检查historical_scalings的梯度
+        # for name, param in model.named_parameters():
+        #     if param.requires_grad:
+        #         if "historical_scalings" in name:
+        #             if param.grad is not None:
+        #                 print(f"Grad for {name}: {param.grad.norm().item()}")
+        #             else:
+        #                 print(f"No grad for {name}")
         
-        # 在第一次训练步骤中检查historical_scalings的初始化
-        if not hasattr(self, '_scalings_checked'):
-            self._scalings_checked = True
-            print("=== Checking historical_scalings initialization ===")
-            for name, param in model.named_parameters():
-                if "historical_scalings" in name:
-                    print(f"Parameter: {name}")
-                    print(f"  Value: {param.data.item()}")
-                    print(f"  Requires grad: {param.requires_grad}")
-                    print(f"  Device: {param.device}")
-                    print(f"  Dtype: {param.dtype}")
+        # print("=== Checking historical_scalings initialization ===")
+        # for name, param in model.named_parameters():
+        #     if "module.base_model.model.encoder.block.0.layer.0.SelfAttention.q.historical_scalings.default" in name or 'module.base_model.model.encoder.block.0.layer.0.SelfAttention.q.loranew_A' in name:
+        #         print(f"Parameter: {name}")
+        #         print(f"  Shape: {param.shape}")
+        #         print(f"  Value: {param.data}")
+        #         print(f"  Requires grad: {param.requires_grad}")
+        #         print(f"  Device: {param.device}")
+        #         print(f"  Dtype: {param.dtype}")
 
         return loss.detach()
 

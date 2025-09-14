@@ -389,7 +389,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                         for i in range(5):
                             direction_key_init = f"dir_{i}"
                             if direction_key_init not in current_module.historical_scalings[adapter_key]:
-                                current_module.historical_scalings[adapter_key][direction_key_init] = torch.nn.Parameter(torch.tensor(0.8, dtype=torch.float32), requires_grad=True)
+                                current_module.historical_scalings[adapter_key][direction_key_init] = torch.nn.Parameter(torch.tensor([0.8], dtype=torch.float32), requires_grad=True)
                     
                     # Create each direction
                     for direction_key, components in directions.items():
@@ -409,7 +409,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                             
                             # 只在scaling参数不存在时创建（使用预设的0.8值）
                             if direction_key not in current_module.historical_scalings[adapter_key]:
-                                scaling_param = torch.nn.Parameter(torch.tensor(0.8, dtype=A_weight.dtype), requires_grad=True)
+                                scaling_param = torch.nn.Parameter(torch.tensor([0.8], dtype=A_weight.dtype), requires_grad=True)
                                 current_module.historical_scalings[adapter_key][direction_key] = scaling_param
 
                             new_num_directions = max(current_module.num_historical_directions[adapter_key], int(direction_key.split('_')[1]) + 1)
