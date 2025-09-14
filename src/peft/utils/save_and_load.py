@@ -385,6 +385,11 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                         current_module.historical_directions[adapter_key] = torch.nn.ModuleDict()
                     if adapter_key not in current_module.historical_scalings:
                         current_module.historical_scalings[adapter_key] = torch.nn.ParameterDict()
+                        # 初始化5个预设的scaling参数（如果不存在）
+                        for i in range(5):
+                            direction_key_init = f"dir_{i}"
+                            if direction_key_init not in current_module.historical_scalings[adapter_key]:
+                                current_module.historical_scalings[adapter_key][direction_key_init] = torch.nn.Parameter(torch.tensor(0.8, dtype=torch.float32), requires_grad=True)
                     
                     # Create each direction
                     for direction_key, components in directions.items():
@@ -402,9 +407,10 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                             # Add to historical_directions
                             current_module.historical_directions[adapter_key][direction_key] = direction_module
                             
-                            # Create placeholder scaling parameter
-                            scaling_param = torch.nn.Parameter(torch.tensor(1.0, dtype=A_weight.dtype))
-                            current_module.historical_scalings[adapter_key][direction_key] = scaling_param
+                            # 只在scaling参数不存在时创建（使用预设的0.8值）
+                            if direction_key not in current_module.historical_scalings[adapter_key]:
+                                scaling_param = torch.nn.Parameter(torch.tensor(0.8, dtype=A_weight.dtype), requires_grad=True)
+                                current_module.historical_scalings[adapter_key][direction_key] = scaling_param
 
                             new_num_directions = max(current_module.num_historical_directions[adapter_key], int(direction_key.split('_')[1]) + 1)
                             current_module.num_historical_directions[adapter_key] = torch.nn.Parameter(
@@ -469,15 +475,22 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                 # Already restored above; skip passing to load_state_dict
                 continue
             # For SDLoRA: handle historical_directions, historical_scalings, and num_historical_directions
-            elif "historical_directions" in k or "historical_scalings" in k or "num_historical_directions" in k:
-                k = k.replace("historical_directions", f"historical_directions.{adapter_name}")
-                k = k.replace("historical_scalings", f"historical_scalings.{adapter_name}")
-                # k = k.replace("num_historical_directions", f"num_historical_directions.{adapter_name}")
+            # 注释掉historical_scalings的加载机制，改为在每个task初始化时创建
+            # elif "historical_directions" in k or "historical_scalings" in k or "num_historical_directions" in k:
+            #     k = k.replace("historical_directions", f"historical_directions.{adapter_name}")
+            #     k = k.replace("historical_scalings", f"historical_scalings.{adapter_name}")
+            #     # k = k.replace("num_historical_directions", f"num_historical_directions.{adapter_name}")
 
-                # 重置historical_scalings
+            #     # 重置historical_scalings
+            #     if "historical_scalings" in k:
+            #         peft_model_state_dict[k] = torch.tensor(0.8,device=v.device,dtype=v.dtype)
+            #         continue
+            elif "historical_directions" in k or "num_historical_directions" in k:
+                # 只处理historical_directions和num_historical_directions，跳过historical_scalings
                 if "historical_scalings" in k:
-                    peft_model_state_dict[k] = torch.tensor(0.8,device=v.device,dtype=v.dtype)
-                    continue
+                    continue  # 跳过historical_scalings的加载
+                k = k.replace("historical_directions", f"historical_directions.{adapter_name}")
+                # k = k.replace("num_historical_directions", f"num_historical_directions.{adapter_name}")
                 peft_model_state_dict[k] = v
             else:
                 peft_model_state_dict[k] = v
