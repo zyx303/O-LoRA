@@ -7,7 +7,7 @@ port=$(shuf -i25000-30000 -n1)
 
 
 
-################## bash scripts/order_2_inflora.sh> exp/inflora/order_2/logs/train_and_infer.log 2>&1 &
+################## bash scripts/order_2_inflora.sh> exp/inflora/order_2_new/logs/train_and_infer.log 2>&1 &
 
 CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \

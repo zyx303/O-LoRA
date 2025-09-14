@@ -163,100 +163,107 @@ class InfLoraModel(torch.nn.Module):
         self.feature_list = []
         self.add_adapter(adapter_name, self.peft_config[adapter_name])
 
-    def update_DualGPM (self, mat_list):
-        threshold = (self.lame - self.lamb)*self._cur_task/self.total_sessions + self.lamb
-        # threshold = 0.9
-        print ('Threshold: ', threshold) 
+    def update_DualGPM(self, mat_list):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # threshold = (self.lame - self.lamb)*self._cur_task/self.total_sessions + self.lamb
+        threshold = 0.85
+        print(f'Threshold: {threshold}, Using device: {device}')
+
         if len(self.feature_list) == 0:
-            # After First Task 
+            # After First Task
+            new_feature_list_gpu = [] # 暫時儲存 GPU 上的新特徵
             for i in range(len(mat_list)):
-                activation = mat_list[i].cpu()
-                U,S,Vh = np.linalg.svd(activation, full_matrices=False)
+                # 將 CPU tensor 上傳到 GPU
+                activation = mat_list[i].to(device)
+                
+                U, S, Vh = torch.linalg.svd(activation, full_matrices=False)
                 # criteria (Eq-5)
                 sval_total = (S**2).sum()
-                sval_ratio = (S**2)/sval_total
-                # print('Layer {} - Singular Value Ratio: {}'.format(i+1, np.cumsum(sval_ratio)))
-                r = np.sum(np.cumsum(sval_ratio)<threshold) #+1  
-                if r < (activation.shape[0]/2):
-                    self.feature_list.append(U[:,0:max(r,1)])
+                sval_ratio = (S**2) / sval_total
+                
+                if i < 20:
+                    print(f'Layer {i+1} - Singular Value Ratio: {torch.cumsum(sval_ratio, dim=0).cpu().numpy()}')
+                
+                r = torch.sum(torch.cumsum(sval_ratio, dim=0) < threshold).item()
+
+                if r < (activation.shape[0] / 2):
+                    new_feature_list_gpu.append(U[:, 0:max(r, 1)])
                     self.project_type.append('remove')
                 else:
-                    self.feature_list.append(U[:,0:max(r,1)])
+                    new_feature_list_gpu.append(U[:, 0:max(r, 1)])
                     self.project_type.append('retain')
-        else:
-            for i in range(len(mat_list)):
-                if self.project_type[i] == 'remove':
-                    activation = mat_list[i].cpu()
-                    U1,S1,Vh1=np.linalg.svd(activation, full_matrices=False)
-                    sval_total = (S1**2).sum()
-                    # Projected Representation (Eq-8)
-                    act_hat = activation - np.dot(np.dot(self.feature_list[i],self.feature_list[i].transpose()),activation)
-                    U,S,Vh = np.linalg.svd(act_hat, full_matrices=False)
-                    # criteria (Eq-9)
-                    sval_hat = (S**2).sum()
-                    sval_ratio = (S**2)/sval_total               
-                    accumulated_sval = (sval_total-sval_hat)/sval_total
             
+            # 3. 計算完成後，將所有 GPU Tensors 下載回 CPU 並轉為 NumPy array
+            self.feature_list = [f.cpu().numpy().astype(np.float32) for f in new_feature_list_gpu]
+
+        else:
+            # 1. 資料上傳：將 NumPy array 列表轉換為 GPU Tensor 列表
+            gpu_feature_list = [torch.from_numpy(f).to(device) for f in self.feature_list]
+
+            for i in range(len(mat_list)):
+                # 將 CPU tensor 上傳到 GPU
+                activation = mat_list[i].to(device)
+                feature = gpu_feature_list[i]
+
+                if self.project_type[i] == 'remove':
+                    _, S1, _ = torch.linalg.svd(activation, full_matrices=False)
+                    sval_total = (S1**2).sum()
+                    
+                    act_hat = activation - (feature @ feature.T @ activation)
+                    U, S, Vh = torch.linalg.svd(act_hat, full_matrices=False)
+                    
+                    sval_hat = (S**2).sum()
+                    sval_ratio = (S**2) / sval_total
+                    accumulated_sval = (sval_total - sval_hat) / sval_total
+
                     r = 0
-                    for ii in range (sval_ratio.shape[0]):
+                    for val in sval_ratio:
                         if accumulated_sval < threshold:
-                            accumulated_sval += sval_ratio[ii]
+                            accumulated_sval += val.item()
                             r += 1
                         else:
                             break
+                            
                     if r == 0:
-                        print ('Skip Updating DualGPM for layer: {}'.format(i+1)) 
+                        print(f'Skip Updating DualGPM for layer: {i+1}')
                         continue
-                    # update GPM
-                    Ui=np.hstack((self.feature_list[i],U[:,0:r]))  
-                    if Ui.shape[1] > Ui.shape[0] :
-                        self.feature_list[i]=Ui[:,0:Ui.shape[0]]
+                        
+                    Ui = torch.hstack((feature, U[:, 0:r]))
+                    if Ui.shape[1] > Ui.shape[0]:
+                        gpu_feature_list[i] = Ui[:, 0:Ui.shape[0]]
                     else:
-                        self.feature_list[i]=Ui
+                        gpu_feature_list[i] = Ui
                 else:
                     assert self.project_type[i] == 'retain'
-                    activation = mat_list[i].cpu()
-                    U1,S1,Vh1=np.linalg.svd(activation, full_matrices=False)
+                    _, S1, _ = torch.linalg.svd(activation, full_matrices=False)
                     sval_total = (S1**2).sum()
-                    # Projected Representation (Eq-8)
-                    act_hat = np.dot(np.dot(self.feature_list[i],self.feature_list[i].transpose()),activation)
-                    U,S,Vh = np.linalg.svd(act_hat, full_matrices=False)
-                    # criteria (Eq-9)
+                    
+                    act_hat = feature @ feature.T @ activation
+                    U, S, Vh = torch.linalg.svd(act_hat, full_matrices=False)
+                    
                     sval_hat = (S**2).sum()
-                    sval_ratio = (S**2)/sval_total               
-                    accumulated_sval = sval_hat/sval_total
+                    sval_ratio = (S**2) / sval_total
+                    accumulated_sval = sval_hat / sval_total
 
                     r = 0
-                    for ii in range (sval_ratio.shape[0]):
-                        if accumulated_sval >= (1-threshold):
-                            accumulated_sval -= sval_ratio[ii]
+                    for val in sval_ratio:
+                        if accumulated_sval >= (1 - threshold):
+                            accumulated_sval -= val.item()
                             r += 1
                         else:
                             break
+                            
                     if r == 0:
-                        print ('Skip Updating DualGPM for layer: {}'.format(i+1)) 
+                        print(f'Skip Updating DualGPM for layer: {i+1}')
                         continue
 
-                    # update GPM by Projected Representation (Eq-8)
-                    act_feature = self.feature_list[i] - np.dot(np.dot(U[:,0:r],U[:,0:r].transpose()),self.feature_list[i])
-                    Ui, Si, Vi = np.linalg.svd(act_feature)
-                    self.feature_list[i]=Ui[:,:self.feature_list[i].shape[1]-r]
-
-        # print('-'*40)
-        # print('Gradient Constraints Summary')
-        # print('-'*40)
-        # for i in range(len(self.feature_list)):
-        #     if self.project_type[i]=='remove' and (self.feature_list[i].shape[1] > (self.feature_list[i].shape[0]/2)):
-        #         feature = self.feature_list[i]
-        #         # ipdb.set_trace()
-        #         U, S, V = np.linalg.svd(feature)
-        #         new_feature = U[:,feature.shape[1]:]
-        #         self.feature_list[i] = new_feature
-        #         self.project_type[i] = 'retain'
-        #     elif self.project_type[i]=='retain':
-        #         assert self.feature_list[i].shape[1] <= (self.feature_list[i].shape[0]/2)
-        #     print ('Layer {} : {}/{} type {}'.format(i+1,self.feature_list[i].shape[1], self.feature_list[i].shape[0], self.project_type[i]))
-        # print('-'*40)
+                    act_feature = feature - (U[:, 0:r] @ U[:, 0:r].T @ feature)
+                    Ui, _, _ = torch.linalg.svd(act_feature)
+                    gpu_feature_list[i] = Ui[:, :feature.shape[1] - r]
+            
+            # 3. 計算完成後，將更新後的 GPU Tensors 列表下載回 CPU 並轉為 NumPy array
+            self.feature_list = [f.cpu().numpy().astype(np.float32) for f in gpu_feature_list]
 
     def add_adapter(self, adapter_name, config=None):
         if config is not None:
