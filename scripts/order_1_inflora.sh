@@ -3,7 +3,6 @@ set -x
 
 export CUDA_DEVICE_ORDER="PCI_BUS_ID"
 export TRANSFORMERS_CACHE=/data/yongxi/.cache/huggingface
-
 port=$(shuf -i25000-30000 -n1)
  
 ################### bash scripts/order_1_inflora.sh> exp/inflora/order_1/logs/train_and_infer.log 2>&1 &

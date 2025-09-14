@@ -403,7 +403,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                             current_module.historical_directions[adapter_key][direction_key] = direction_module
                             
                             # Create placeholder scaling parameter
-                            scaling_param = torch.nn.Parameter(torch.tensor(2.0, dtype=A_weight.dtype))
+                            scaling_param = torch.nn.Parameter(torch.tensor(1.0, dtype=A_weight.dtype))
                             current_module.historical_scalings[adapter_key][direction_key] = scaling_param
 
                             new_num_directions = max(current_module.num_historical_directions[adapter_key], int(direction_key.split('_')[1]) + 1)

@@ -471,8 +471,6 @@ class LoraLayer:
             nn.init.kaiming_uniform_(self.loranew_A[adapter_name].weight, a=math.sqrt(5))
             nn.init.zeros_(self.loranew_B[adapter_name].weight)
 
-        
-
 
 class Linear(nn.Linear, LoraLayer):
     def __init__(

@@ -1,4 +1,3 @@
-
 1. 训练的参数是ψ（lm_head), prompt
 2. default是只启用e_prompt（vit的**前5个layer**, 用prefix，train和infer都是)：
    
@@ -122,7 +121,7 @@
 
 > prompt_weight不使用
 
-![image-20250905203952371](https://blogstastic-zyx.oss-cn-hangzhou.aliyuncs.com/images/image-20250905203952371.png)
+![image-20250905203952371](./hidepromt.assets/image-20250905203952371.png)
 
 > 正在收集工作区信息下面按算法伪代码（图中第1–16行）逐步对应到仓库中的实现代码与符号。
 >
@@ -207,7 +206,7 @@
 
 
 
-> ![image-20250905205233619](https://blogstastic-zyx.oss-cn-hangzhou.aliyuncs.com/images/image-20250905205233619.png)
+> ![image-20250905205233619](./hidepromt.assets/image-20250905205233619.png)
 > 正在收集工作区信息下面把论文中4个损失和仓库里的实现一一对应，并标出用到的特征来源 pre_logits。
 >
 > - LCR(pt)（Eq. 9，类间/正交正则）
