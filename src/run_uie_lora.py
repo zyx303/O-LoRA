@@ -544,6 +544,10 @@ def main():
             param.requires_grad = False
         elif name.find("historical_directions") != -1:
             param.requires_grad = False
+        elif name.find("scaling") != -1:
+            param.requires_grad = True
+        elif name.find("historical_scalings") != -1:
+            param.requires_grad = True
 
     # L2P specific parameter freezing
     if model_args.peft_type.upper() == "L2P":
