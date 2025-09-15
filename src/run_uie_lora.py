@@ -735,13 +735,43 @@ def main():
                 }
             ]
             
-            from transformers import AdamW
+            from transformers import AdamW,get_constant_schedule,get_linear_schedule_with_warmup
             optimizer = AdamW(param_groups)
             
-            trainer.optimizer = optimizer
+            print(f"历史scaling参数数量: {len(historical_scaling_params)}")
+            print(f"其他参数数量: {len(other_params)}")
+            # 创建自定义调度器
+            class CustomScheduler:
+                def __init__(self, optimizer, num_training_steps):
+                    self.optimizer = optimizer
+                    # 其他参数使用 constant scheduler
+                    self.scheduler_other = get_constant_schedule(optimizer)
+                    # historical_scaling_params 使用线性衰减 scheduler
+                    self.scheduler_historical = get_linear_schedule_with_warmup(
+                        optimizer, 
+                        num_warmup_steps=100,  
+                        num_training_steps=num_training_steps
+                    )
+                    
+                def step(self):
+                    current_lr_other = self.scheduler_other.get_last_lr()[0]
+                    current_lr_historical = self.scheduler_historical.get_last_lr()[0]
+                    
+                    self.optimizer.param_groups[0]['lr'] = current_lr_other
+                    self.optimizer.param_groups[1]['lr'] = current_lr_historical
+
+                    self.scheduler_other.step()
+                    self.scheduler_historical.step()
+                    
+                def get_last_lr(self):
+                    return [self.scheduler_other.get_last_lr()[0], self.scheduler_historical.get_last_lr()[0]]
         
-        print(f"历史scaling参数数量: {len(historical_scaling_params)}")
-        print(f"其他参数数量: {len(other_params)}")
+        # 计算训练步数
+        total_steps = len(trainer.get_train_dataloader()) * training_args.num_train_epochs
+        custom_scheduler = CustomScheduler(optimizer, total_steps)
+        
+        trainer.optimizer = optimizer
+        trainer.lr_scheduler = custom_scheduler
 
 
         if model_args.peft_type.upper() == "INFLORA":
