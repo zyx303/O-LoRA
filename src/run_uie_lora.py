@@ -711,6 +711,39 @@ def main():
             checkpoint = training_args.resume_from_checkpoint
         elif last_checkpoint is not None:
             checkpoint = last_checkpoint
+
+        if model_args.peft_type.upper() == "SDLORA":
+            historical_scaling_params = []
+            other_params = []
+            
+            for name, param in model.named_parameters():
+                if param.requires_grad:
+                    if "historical_scalings" in name:
+                        historical_scaling_params.append(param)
+                    else:
+                        other_params.append(param)
+            
+            # 创建参数组
+            param_groups = [
+                {
+                    'params': other_params,
+                    'lr': 1e-3
+                },
+                {
+                    'params': historical_scaling_params,
+                    'lr': 0.05
+                }
+            ]
+            
+            from transformers import AdamW
+            optimizer = AdamW(param_groups)
+            
+            trainer.optimizer = optimizer
+        
+        print(f"历史scaling参数数量: {len(historical_scaling_params)}")
+        print(f"其他参数数量: {len(other_params)}")
+
+
         if model_args.peft_type.upper() == "INFLORA":
             trainer.model.base_model._cur_task = task_id-1
             # get current feature matrix
@@ -762,9 +795,9 @@ def main():
                         kk += 1
             print("Initialization done!")
                         
-
+        
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
-
+        
         if model_args.peft_type.upper() == "INFLORA":
             print("getting feature directions for task ", task_id-1)
             base = trainer.model.base_model

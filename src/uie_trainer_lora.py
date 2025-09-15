@@ -54,7 +54,40 @@ class DenserEvalCallback(TrainerCallback):
 
 
 class UIETrainer(Seq2SeqTrainer):
-
+    # def create_optimizer(self):
+    #     """创建具有不同参数组学习率的优化器"""
+    #     if self.optimizer is None:
+    #         historical_scaling_params = []
+    #         other_params = []
+            
+    #         for name, param in self.model.named_parameters():
+    #             if param.requires_grad:
+    #                 if "historical_scalings" in name:
+    #                     historical_scaling_params.append(param)
+    #                 else:
+    #                     other_params.append(param)
+            
+    #         # 创建参数组
+    #         optimizer_grouped_parameters = []
+            
+    #         if other_params:
+    #             optimizer_grouped_parameters.append({
+    #                 'params': other_params,
+    #                 'lr': self.args.learning_rate,  # 使用默认学习率
+    #                 'weight_decay': self.args.weight_decay,
+    #             })
+            
+    #         if historical_scaling_params:
+    #             optimizer_grouped_parameters.append({
+    #                 'params': historical_scaling_params, 
+    #                 'lr': self.args.learning_rate * 10.0,  # 10倍学习率
+    #                 'weight_decay': self.args.weight_decay,
+    #             })
+            
+    #         # 让 DeepSpeed 处理优化器创建
+    #         return None  # 返回 None 让 DeepSpeed 自己创建
+        
+    #     return self.optimizer
 
     def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
         """
