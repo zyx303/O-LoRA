@@ -241,7 +241,6 @@ class SDLoraModel(torch.nn.Module):
         self._bind_shared_scalings_to_layers(adapter_name)
 
     def _bind_shared_scalings_to_layers(self, adapter_name):
-        """为所有LoRA层注入共享 historical scaling 的只读视图（不建立父子引用）。"""
         shared = self.shared_historical_scalings.get(adapter_name, None)
         if shared is None:
             return
