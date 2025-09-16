@@ -626,8 +626,24 @@ class Linear(nn.Linear, LoraLayer):
             # Current task LoRA: α_t A_t B_t  
             # This implements the current task term from equation (4)
             if has_new and self.r.get(self.active_adapter, 0) > 0:
-                current_output = self.loranew_B[self.active_adapter](self.loranew_A[self.active_adapter](x_lora))
-                result = result + current_output * self.scaling[self.active_adapter]
+                # 当前方向索引：使用“下一个”历史方向编号作为当前任务的缩放槽位
+                cur_idx = 0
+                if self.active_adapter in self.num_historical_directions:
+                    cur_idx = int(self.num_historical_directions[self.active_adapter].item())
+                direction_key_cur = f"dir_{cur_idx}"
+                historical_scalings = self.shared_historical_scalings_view.get(self.active_adapter, {})
+                scale_param = historical_scalings.get(direction_key_cur, None) if isinstance(historical_scalings, dict) else None
+
+                current_after_A = self.loranew_A[self.active_adapter](x_lora)
+                current_output_raw = self.loranew_B[self.active_adapter](current_after_A)
+                # 与历史方向一致的归一化
+                with torch.no_grad():
+                    norm_factor_cur = torch.norm(self.loranew_A[self.active_adapter].weight) * torch.norm(self.loranew_B[self.active_adapter].weight)
+                if scale_param is not None:
+                    current_output = current_output_raw / (norm_factor_cur + 1e-8) * scale_param
+                else:
+                    current_output = current_output_raw
+                result = result + current_output
 
         return result.to(previous_dtype)
 
