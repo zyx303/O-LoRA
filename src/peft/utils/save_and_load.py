@@ -605,10 +605,14 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
         
     model.load_state_dict(peft_model_state_dict, strict=False)
     
-    # 特殊处理：SDLoraModel需要在加载后恢复LoraLayer的引用关系
+    # 特殊处理：SDLoraModel需要在加载后为各层绑定共享的historical scaling视图
     if config.peft_type == PeftType.SDLORA:
-        if hasattr(model, 'restore_references_after_load'):
-            model.restore_references_after_load()
+        # 优先调用公开绑定逻辑
+        if hasattr(model, '_bind_shared_scalings_to_layers'):
+            try:
+                model._bind_shared_scalings_to_layers(adapter_name)
+            except Exception:
+                pass
     
     if isinstance(config, PromptLearningConfig) and config.peft_type not in [PeftType.L2P, PeftType.HIDE_PROMPT]:
          model.prompt_encoder[adapter_name].embedding.load_state_dict(

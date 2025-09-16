@@ -147,12 +147,6 @@ class SDLoraModel(torch.nn.Module):
         """获取指定adapter的共享historical scaling参数"""
         return self.shared_historical_scalings.get(adapter_name, {})
 
-    def restore_references_after_load(self):
-        """在加载模型后重新建立LoraLayer和SDLoraModel之间的引用关系"""
-        for module in self.model.modules():
-            if isinstance(module, LoraLayer):
-                module.set_sdlora_model(self)
-
 
     def _find_and_replace(self, adapter_name):
         lora_config = self.peft_config[adapter_name]
@@ -243,14 +237,17 @@ class SDLoraModel(torch.nn.Module):
                 f"Target modules {lora_config.target_modules} not found in the base model."
             )
         
-        # 为所有LoraLayer设置SDLoraModel引用
-        self._set_sdlora_model_reference(adapter_name)
+        # 为所有LoRA层注入共享 historical scaling 视图
+        self._bind_shared_scalings_to_layers(adapter_name)
 
-    def _set_sdlora_model_reference(self, adapter_name):
-        """为所有LoraLayer设置SDLoraModel引用，使其能够访问共享的historical_scalings"""
+    def _bind_shared_scalings_to_layers(self, adapter_name):
+        """为所有LoRA层注入共享 historical scaling 的只读视图（不建立父子引用）。"""
+        shared = self.shared_historical_scalings.get(adapter_name, None)
+        if shared is None:
+            return
         for module in self.model.modules():
             if isinstance(module, LoraLayer):
-                module.set_sdlora_model(self)
+                module.set_shared_historical_scalings(adapter_name, shared)
 
     def _replace_module(self, parent_module, child_name, new_module, old_module):
         setattr(parent_module, child_name, new_module)
@@ -358,7 +355,7 @@ class SDLoraModel(torch.nn.Module):
                         module.loranew_A[adapter_name].weight.zero_()
                         module.loranew_B[adapter_name].weight.zero_()
 
-
+# 后面会被覆盖
 def mark_only_lora_as_trainable(model: nn.Module, bias: str = "none") -> None:
     for n, p in model.named_parameters():
         if "lora_" not in n:
@@ -392,8 +389,8 @@ class LoraLayer:
         # self.historical_scalings = nn.ParameterDict({})  # 移除这行
         # 使用 ParameterDict 来保存历史方向数量，这样可以被torch保存和加载
         self.num_historical_directions = nn.ParameterDict({})  # 记录每个adapter的历史方向数量
-        # 添加对SDLoraModel的引用
-        self.sdlora_model = None
+        # 注入的共享 historical scaling 视图：adapter_name -> ParameterDict(dir_i -> Parameter)
+        self.shared_historical_scalings_view = {}
         # Embedding相关参数
         self.lora_embedding_A = nn.ParameterDict({})
         self.lora_embedding_B = nn.ParameterDict({})
@@ -409,15 +406,9 @@ class LoraLayer:
         self.in_features = in_features
         self.out_features = out_features
 
-    def set_sdlora_model(self, sdlora_model):
-        """设置SDLoraModel的引用，用于获取共享的historical_scalings"""
-        self.sdlora_model = sdlora_model
-
-    def get_historical_scalings(self, adapter_name):
-        """从SDLoraModel获取共享的historical scaling参数"""
-        if self.sdlora_model is not None:
-            return self.sdlora_model.get_shared_historical_scalings(adapter_name)
-        return {}
+    def set_shared_historical_scalings(self, adapter_name, shared_scalings: nn.ParameterDict):
+        """注入共享 historical scaling 的只读视图，避免子模块引用父模型。"""
+        self.shared_historical_scalings_view[adapter_name] = shared_scalings
 
     def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, r_sum):
         self.r[adapter_name] = r
@@ -606,8 +597,8 @@ class Linear(nn.Linear, LoraLayer):
             # Historical LoRA directions: sum over previous tasks with individual trainable scalings
             # This implements the sum: α_1 A_1 B_1 + α_2 A_2 B_2 + ... + α_{t-1} A_{t-1} B_{t-1}
             if self.active_adapter in self.num_historical_directions and self.num_historical_directions[self.active_adapter].item() > 0:
-                # 获取共享的historical scaling参数
-                historical_scalings = self.get_historical_scalings(self.active_adapter)
+                # 使用注入的共享historical scaling参数视图
+                historical_scalings = self.shared_historical_scalings_view.get(self.active_adapter, {})
                 
                 for i in range(self.num_historical_directions[self.active_adapter].item()):
                     direction_key = f"dir_{i}"

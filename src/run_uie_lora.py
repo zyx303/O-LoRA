@@ -546,7 +546,7 @@ def main():
             param.requires_grad = False
         elif name.find("scaling") != -1:
             param.requires_grad = True
-        elif name.find("historical_scalings") != -1:
+        elif name.find("shared_historical_scalings") != -1:
             param.requires_grad = True
 
     # L2P specific parameter freezing
