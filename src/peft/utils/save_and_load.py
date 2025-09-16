@@ -179,14 +179,15 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
                 to_return = {k: state_dict[k] for k in state_dict if "lora_" in k or "loranew_" in k} # modified
             else:
                 base_keys = {k: state_dict[k] for k in state_dict if "lora_" in k}
-                # For SDLoRA with separate storage, also include historical directions and scalings
+                # For SDLoRA with separate storage, also include historical directions and shared scalings
                 if config.peft_type == PeftType.SDLORA:
-                    # historical_keys = {k: state_dict[k] for k in state_dict if "historical_directions" in k or "historical_scalings" in k}
-                    # 不加载scaling
-                    historical_keys = {k: state_dict[k] for k in state_dict if "historical_directions" in k }
+                    # 包含历史方向和共享的scaling参数
+                    historical_keys = {k: state_dict[k] for k in state_dict if "historical_directions" in k}
+                    # 包含共享的scaling参数（现在在SDLoraModel级别）
+                    shared_scaling_keys = {k: state_dict[k] for k in state_dict if "shared_historical_scalings" in k}
                     # Also save num_historical_directions for each layer
                     num_directions_keys = {k: state_dict[k] for k in state_dict if "num_historical_directions" in k}
-                    to_return = {**base_keys, **historical_keys, **num_directions_keys}
+                    to_return = {**base_keys, **historical_keys, **shared_scaling_keys, **num_directions_keys}
                 else:
                     to_return = base_keys
                 # Update r_sum for SDLoRA based on consolidated lora_A size
@@ -210,7 +211,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
             raise NotImplementedError
 
         # modified
-        to_return = {k: v for k, v in to_return.items() if (("lora_" in k and adapter_name in k) or ("bias" in k) or ("loranew_" in k) or ("historical_directions" in k) or ("historical_scalings" in k) or ("num_historical_directions" in k))}
+        to_return = {k: v for k, v in to_return.items() if (("lora_" in k and adapter_name in k) or ("bias" in k) or ("loranew_" in k) or ("historical_directions" in k) or ("num_historical_directions" in k))}
         
         if config.peft_type == PeftType.ADALORA:
             rank_pattern = config.rank_pattern
@@ -381,17 +382,12 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                         break
                 
                 # Check if this is a LoRA layer with historical directions capability
-                if hasattr(current_module, 'historical_directions') and hasattr(current_module, 'historical_scalings'):
+                if hasattr(current_module, 'historical_directions'):
                     # Ensure the adapter key exists in historical_directions
                     if adapter_key not in current_module.historical_directions:
                         current_module.historical_directions[adapter_key] = torch.nn.ModuleDict()
-                    if adapter_key not in current_module.historical_scalings:
-                        current_module.historical_scalings[adapter_key] = torch.nn.ParameterDict()
-                        # 初始化5个预设的scaling参数（如果不存在）
-                        for i in range(5):
-                            direction_key_init = f"dir_{i}"
-                            if direction_key_init not in current_module.historical_scalings[adapter_key]:
-                                current_module.historical_scalings[adapter_key][direction_key_init] = torch.nn.Parameter(torch.tensor([0.8], dtype=torch.float32), requires_grad=True)
+                    
+                    # 不再处理historical_scalings，因为它们现在在SDLoraModel级别管理
                     
                     # Create each direction
                     for direction_key, components in directions.items():
@@ -408,13 +404,8 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                             
                             # Add to historical_directions
                             current_module.historical_directions[adapter_key][direction_key] = direction_module
-                            
-                            # 只在scaling参数不存在时创建（使用预设的0.8值）
-                            if direction_key not in current_module.historical_scalings[adapter_key]:
-                                scaling_param = torch.nn.Parameter(torch.tensor([0.8], dtype=A_weight.dtype), requires_grad=True)
-                                current_module.historical_scalings[adapter_key][direction_key] = scaling_param
 
-                            new_num_directions = max(current_module.num_historical_directions[adapter_key], int(direction_key.split('_')[1]) + 1)
+                            new_num_directions = max(current_module.num_historical_directions.get(adapter_key, torch.tensor(0)).item(), int(direction_key.split('_')[1]) + 1)
                             current_module.num_historical_directions[adapter_key] = torch.nn.Parameter(
                                 torch.tensor(new_num_directions, dtype=torch.long), 
                                 requires_grad=False
@@ -487,12 +478,11 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
             #     if "historical_scalings" in k:
             #         peft_model_state_dict[k] = torch.tensor(0.8,device=v.device,dtype=v.dtype)
             #         continue
-            elif "historical_directions" in k or "num_historical_directions" in k:
-                # 只处理historical_directions和num_historical_directions，跳过historical_scalings
-                if "historical_scalings" in k:
-                    continue  # 跳过historical_scalings的加载
-                k = k.replace("historical_directions", f"historical_directions.{adapter_name}")
-                # k = k.replace("num_historical_directions", f"num_historical_directions.{adapter_name}")
+            elif "historical_directions" in k or "num_historical_directions" in k or "shared_historical_scalings" in k:
+                # 处理historical_directions, num_historical_directions, 和shared_historical_scalings
+                if "historical_directions" in k:
+                    k = k.replace("historical_directions", f"historical_directions.{adapter_name}")
+                # shared_historical_scalings保持原样，因为它们在SDLoraModel级别
                 peft_model_state_dict[k] = v
             else:
                 peft_model_state_dict[k] = v
@@ -614,6 +604,12 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
             f.write(f"{k}: {v}\n")
         
     model.load_state_dict(peft_model_state_dict, strict=False)
+    
+    # 特殊处理：SDLoraModel需要在加载后恢复LoraLayer的引用关系
+    if config.peft_type == PeftType.SDLORA:
+        if hasattr(model, 'restore_references_after_load'):
+            model.restore_references_after_load()
+    
     if isinstance(config, PromptLearningConfig) and config.peft_type not in [PeftType.L2P, PeftType.HIDE_PROMPT]:
          model.prompt_encoder[adapter_name].embedding.load_state_dict(
              {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
