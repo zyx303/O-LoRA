@@ -45,7 +45,7 @@ port=$(shuf -i25000-30000 -n1)
 
 # sleep 5
 
-CUDA_VISIBLE_DEVICES=7 deepspeed --master_port $port src/run_uie_lora.py \
+accelerate launch --num_process=4 src/run_uie_lora.py \
    --do_train \
    --predict_with_generate \
    --model_name_or_path exp/sdlora/order_1/outputs/1-dbpedia/adapter \
@@ -59,7 +59,6 @@ CUDA_VISIBLE_DEVICES=7 deepspeed --master_port $port src/run_uie_lora.py \
    --gradient_accumulation_steps 1 \
    --learning_rate 1e-03 \
    --num_train_epochs 1 \
-   --deepspeed configs/ds_configs/stage2.config \
    --run_name order1_round2_sdlora \
    --max_source_length 512 \
    --max_target_length 50 \

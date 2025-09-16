@@ -307,7 +307,7 @@ class SDLoraModel(torch.nn.Module):
                 if adapter_name in module.loranew_A and adapter_name in module.lora_A:
                     current_A = module.loranew_A[adapter_name].weight.detach().clone()
                     current_B = module.loranew_B[adapter_name].weight.detach().clone()
-                    initial_scaling = module.scaling[adapter_name]
+                    initial_scaling = module.scaling[adapter_name] * torch.norm(current_A) * torch.norm(current_B)
                     
                     # Add current directions as a new historical direction
                     module.add_historical_direction(adapter_name, current_A, current_B, initial_scaling)
@@ -387,7 +387,7 @@ class LoraLayer:
             initial_scalings = {}
             for i in range(5):  # 5个方向
                 direction_key = f"dir_{i}"
-                initial_scalings[direction_key] = nn.Parameter(torch.tensor(0.8, dtype=torch.float32), requires_grad=True)
+                initial_scalings[direction_key] = nn.Parameter(torch.tensor([0.8], dtype=torch.float32), requires_grad=True)
             self.historical_scalings.update(nn.ParameterDict({adapter_name: nn.ParameterDict(initial_scalings)}))
             
             # 为了向后兼容，保留原始的lora_A和lora_B（但现在它们只是占位符）
@@ -414,15 +414,15 @@ class LoraLayer:
             direction_B: B矩阵 [out_features, r]
             initial_scaling: 初始scaling值
         """
-        if adapter_name not in self.historical_directions:
-            self.historical_directions.update(nn.ModuleDict({adapter_name: nn.ModuleDict({})}))
-            # 初始化5个预设的scaling参数
-            initial_scalings = {}
-            for i in range(5):  # 5个方向
-                direction_key = f"dir_{i}"
-                initial_scalings[direction_key] = nn.Parameter(torch.tensor([0.8], dtype=torch.float32), requires_grad=True)
-            self.historical_scalings.update(nn.ParameterDict({adapter_name: nn.ParameterDict(initial_scalings)}))
-            self.num_historical_directions[adapter_name] = nn.Parameter(torch.tensor(0, dtype=torch.long), requires_grad=False)
+        # if adapter_name not in self.historical_directions:
+        #     self.historical_directions.update(nn.ModuleDict({adapter_name: nn.ModuleDict({})}))
+        #     # 初始化5个预设的scaling参数
+        #     initial_scalings = {}
+        #     for i in range(5):  # 5个方向
+        #         direction_key = f"dir_{i}"
+        #         initial_scalings[direction_key] = nn.Parameter(torch.tensor([0.8], dtype=torch.float32), requires_grad=True)
+        #     self.historical_scalings.update(nn.ParameterDict({adapter_name: nn.ParameterDict(initial_scalings)}))
+        #     self.num_historical_directions[adapter_name] = nn.Parameter(torch.tensor(0, dtype=torch.long), requires_grad=False)
         
         direction_idx = self.num_historical_directions[adapter_name].item()
         direction_name = f"dir_{direction_idx}"
@@ -445,6 +445,8 @@ class LoraLayer:
         self.historical_directions[adapter_name].update(nn.ModuleDict({direction_name: direction_module}))
         
         # scaling参数已经在初始化时创建，这里只需要确保direction_name在范围内
+        self.historical_scalings[adapter_name].update(nn.ParameterDict({direction_name: nn.Parameter(torch.tensor(initial_scaling, dtype=torch.float32), requires_grad=True)}))
+
         # if direction_name in self.historical_scalings[adapter_name]:
         #     print(f"Using pre-initialized scaling parameter for {direction_name}")
         # else:

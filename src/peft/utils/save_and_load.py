@@ -181,7 +181,9 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
                 base_keys = {k: state_dict[k] for k in state_dict if "lora_" in k}
                 # For SDLoRA with separate storage, also include historical directions and scalings
                 if config.peft_type == PeftType.SDLORA:
-                    historical_keys = {k: state_dict[k] for k in state_dict if "historical_directions" in k or "historical_scalings" in k}
+                    # historical_keys = {k: state_dict[k] for k in state_dict if "historical_directions" in k or "historical_scalings" in k}
+                    # 不加载scaling
+                    historical_keys = {k: state_dict[k] for k in state_dict if "historical_directions" in k }
                     # Also save num_historical_directions for each layer
                     num_directions_keys = {k: state_dict[k] for k in state_dict if "num_historical_directions" in k}
                     to_return = {**base_keys, **historical_keys, **num_directions_keys}
