@@ -20,10 +20,9 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 accelerate launch --num_processes=4 src/run_uie_lor
    --output_dir exp/long_no_bf16/sdlora/outputs/1-yelp \
    --per_device_train_batch_size 8 \
    --per_device_eval_batch_size 128 \
-   --gradient_accumulation_steps 2 \
+   --gradient_accumulation_steps 1 \
    --bf16 False \
    --num_train_epochs 1 \
-   --deepspeed configs/ds_configs/stage2.config \
    --run_name long_round1 \
    --max_source_length 512 \
    --max_target_length 50 \
@@ -57,10 +56,9 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 accelerate launch --num_processes=4 src/run_uie_lor
    --output_dir exp/long_no_bf16/sdlora/outputs/2-amazon \
    --per_device_train_batch_size 8 \
    --per_device_eval_batch_size 128 \
-   --gradient_accumulation_steps 2 \
+   --gradient_accumulation_steps 1 \
    --bf16 False \
    --num_train_epochs 1 \
-   --deepspeed configs/ds_configs/stage2.config \
    --run_name long_round2 \
    --max_source_length 512 \
    --max_target_length 50 \
@@ -94,10 +92,9 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 accelerate launch --num_processes=4 src/run_uie_lor
    --output_dir exp/long_no_bf16/sdlora/outputs/3-MNLI \
    --per_device_train_batch_size 8 \
    --per_device_eval_batch_size 128 \
-   --gradient_accumulation_steps 2 \
+   --gradient_accumulation_steps 1 \
    --bf16 False \
    --num_train_epochs 2 \
-   --deepspeed configs/ds_configs/stage2.config \
    --run_name long_round3 \
    --max_source_length 512 \
    --max_target_length 50 \
@@ -131,10 +128,9 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 accelerate launch --num_processes=4 src/run_uie_lor
    --output_dir exp/long_no_bf16/sdlora/outputs/4-CB \
    --per_device_train_batch_size 8 \
    --per_device_eval_batch_size 128 \
-   --gradient_accumulation_steps 2 \
+   --gradient_accumulation_steps 1 \
    --bf16 False \
    --num_train_epochs 1 \
-   --deepspeed configs/ds_configs/stage2.config \
    --run_name long_round4 \
    --max_source_length 512 \
    --max_target_length 50 \
@@ -168,10 +164,9 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 accelerate launch --num_processes=4 src/run_uie_lor
    --output_dir exp/long_no_bf16/sdlora/outputs/5-COPA \
    --per_device_train_batch_size 8 \
    --per_device_eval_batch_size 128 \
-   --gradient_accumulation_steps 2 \
+   --gradient_accumulation_steps 1 \
    --bf16 False \
    --num_train_epochs 1 \
-   --deepspeed configs/ds_configs/stage2.config \
    --run_name long_round5 \
    --max_source_length 512 \
    --max_target_length 50 \
@@ -205,10 +200,9 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 accelerate launch --num_processes=4 src/run_uie_lor
    --output_dir exp/long_no_bf16/sdlora/outputs/6-QQP \
    --per_device_train_batch_size 8 \
    --per_device_eval_batch_size 128 \
-   --gradient_accumulation_steps 2 \
+   --gradient_accumulation_steps 1 \
    --bf16 False \
    --num_train_epochs 1 \
-   --deepspeed configs/ds_configs/stage2.config \
    --run_name long_round6 \
    --max_source_length 512 \
    --max_target_length 50 \
@@ -241,10 +235,9 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 accelerate launch --num_processes=4 src/run_uie_lor
    --output_dir exp/long_no_bf16/sdlora/outputs/7-RTE \
    --per_device_train_batch_size 8 \
    --per_device_eval_batch_size 128 \
-   --gradient_accumulation_steps 2 \
+   --gradient_accumulation_steps 1 \
    --bf16 False \
    --num_train_epochs 1 \
-   --deepspeed configs/ds_configs/stage2.config \
    --run_name long_round7 \
    --max_source_length 512 \
    --max_target_length 50 \
@@ -277,10 +270,9 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 accelerate launch --num_processes=4 src/run_uie_lor
    --output_dir exp/long_no_bf16/sdlora/outputs/8-IMDB \
    --per_device_train_batch_size 8 \
    --per_device_eval_batch_size 128 \
-   --gradient_accumulation_steps 2 \
+   --gradient_accumulation_steps 1 \
    --bf16 False \
    --num_train_epochs 1 \
-   --deepspeed configs/ds_configs/stage2.config \
    --run_name long_round8 \
    --max_source_length 512 \
    --max_target_length 50 \
@@ -314,10 +306,9 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 accelerate launch --num_processes=4 src/run_uie_lor
    --output_dir exp/long_no_bf16/sdlora/outputs/9-SST-2 \
    --per_device_train_batch_size 8 \
    --per_device_eval_batch_size 128 \
-   --gradient_accumulation_steps 2 \
+   --gradient_accumulation_steps 1 \
    --bf16 False \
    --num_train_epochs 1 \
-   --deepspeed configs/ds_configs/stage2.config \
    --run_name long_round9 \
    --max_source_length 512 \
    --max_target_length 50 \
@@ -351,10 +342,9 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 accelerate launch --num_processes=4 src/run_uie_lor
    --output_dir exp/long_no_bf16/sdlora/outputs/10-dbpedia \
    --per_device_train_batch_size 8 \
    --per_device_eval_batch_size 128 \
-   --gradient_accumulation_steps 2 \
+   --gradient_accumulation_steps 1 \
    --bf16 False \
    --num_train_epochs 1 \
-   --deepspeed configs/ds_configs/stage2.config \
    --run_name long_round10 \
    --max_source_length 512 \
    --max_target_length 50 \
@@ -388,10 +378,9 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 accelerate launch --num_processes=4 src/run_uie_lor
    --output_dir exp/long_no_bf16/sdlora/outputs/11-agnews \
    --per_device_train_batch_size 8 \
    --per_device_eval_batch_size 128 \
-   --gradient_accumulation_steps 2 \
+   --gradient_accumulation_steps 1 \
    --bf16 False \
    --num_train_epochs 1 \
-   --deepspeed configs/ds_configs/stage2.config \
    --run_name long_round11 \
    --max_source_length 512 \
    --max_target_length 50 \
@@ -426,10 +415,9 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 accelerate launch --num_processes=4 src/run_uie_lor
    --output_dir exp/long_no_bf16/sdlora/outputs/12-yahoo \
    --per_device_train_batch_size 8 \
    --per_device_eval_batch_size 128 \
-   --gradient_accumulation_steps 2 \
+   --gradient_accumulation_steps 1 \
    --bf16 False \
    --num_train_epochs 1 \
-   --deepspeed configs/ds_configs/stage2.config \
    --run_name long_round12 \
    --max_source_length 512 \
    --max_target_length 50 \
@@ -464,10 +452,9 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 accelerate launch --num_processes=4 src/run_uie_lor
    --output_dir exp/long_no_bf16/sdlora/outputs/13-MultiRC \
    --per_device_train_batch_size 8 \
    --per_device_eval_batch_size 128 \
-   --gradient_accumulation_steps 2 \
+   --gradient_accumulation_steps 1 \
    --bf16 False \
    --num_train_epochs 1 \
-   --deepspeed configs/ds_configs/stage2.config \
    --run_name long_round13 \
    --max_source_length 512 \
    --max_target_length 50 \
@@ -502,10 +489,9 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 accelerate launch --num_processes=4 src/run_uie_lor
    --output_dir exp/long_no_bf16/sdlora/outputs/14-BoolQA \
    --per_device_train_batch_size 8 \
    --per_device_eval_batch_size 128 \
-   --gradient_accumulation_steps 2 \
+   --gradient_accumulation_steps 1 \
    --bf16 False \
    --num_train_epochs 1 \
-   --deepspeed configs/ds_configs/stage2.config \
    --run_name long_round14 \
    --max_source_length 512 \
    --max_target_length 50 \
@@ -540,10 +526,9 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 accelerate launch --num_processes=4 src/run_uie_lor
    --output_dir exp/long_no_bf16/sdlora/outputs/15-WiC \
    --per_device_train_batch_size 8 \
    --per_device_eval_batch_size 128 \
-   --gradient_accumulation_steps 2 \
+   --gradient_accumulation_steps 1 \
    --bf16 False \
    --num_train_epochs 1 \
-   --deepspeed configs/ds_configs/stage2.config \
    --run_name long_round15 \
    --max_source_length 512 \
    --max_target_length 50 \

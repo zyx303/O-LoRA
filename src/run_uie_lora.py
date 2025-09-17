@@ -733,13 +733,15 @@ def main():
                 },
                 {
                     'params': historical_scaling_params,
-                    'lr': 0.1,
+                    'lr': 0.01,
                     'weight_decay': 0
                 }
             ]
             
             from transformers import AdamW,get_constant_schedule,get_linear_schedule_with_warmup
             optimizer = AdamW(param_groups)
+
+            scheduler = get_constant_schedule(optimizer)
             
             print(f"历史scaling参数数量: {len(historical_scaling_params)}")
             print(f"其他参数数量: {len(other_params)}")
@@ -783,6 +785,7 @@ def main():
             # )
             
             trainer.optimizer = optimizer
+            trainer.lr_scheduler = scheduler
             # trainer.lr_scheduler = custom_scheduler
 
 

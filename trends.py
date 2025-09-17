@@ -70,6 +70,7 @@ def parse_sdlora_sequential_results(base_path):
         results[order_name] = {}
         
         outputs_dir = order_dir / 'outputs'
+        print(f"Looking for outputs in: {outputs_dir}")
         if not outputs_dir.exists():
             continue
         
@@ -78,12 +79,12 @@ def parse_sdlora_sequential_results(base_path):
         # 按任务序号排序（1-task, 2-task, 3-task, 4-task）
         task_dirs = sorted([d for d in outputs_dir.glob('*') if d.is_dir()], 
                           key=lambda x: int(x.name.split('-')[0]))
-        
+        print(f"  找到 {len(task_dirs)} 个任务阶段.")
         # 对于每个完成的任务阶段，记录所有任务的准确率
         for i, task_dir in enumerate(task_dirs):
             stage_name = f"after_task_{i+1}"  # after_task_1, after_task_2, etc.
             
-            predict_results_file = task_dir / 'predict_results.json'
+            predict_results_file = task_dir / 'all_results.json'
             if predict_results_file.exists():
                 # 获取这个阶段所有任务的准确率
                 all_task_accs = extract_all_task_accuracies(predict_results_file)
@@ -92,7 +93,6 @@ def parse_sdlora_sequential_results(base_path):
                 print(f"  完成任务 {i+1} 后的准确率:")
                 for task, acc in all_task_accs.items():
                     print(f"    {task}: {acc:.2f}")
-    
     return results
 
 def plot_sequential_accuracy_trends(results, save_path=None):
@@ -241,8 +241,13 @@ def create_summary_table(results):
 
 def main():
     # 设置数据路径
-    sdlora_path = "/home/yongxi/work/O-LoRA/logs_and_outputs/sdlora"
-    
+    import argparse
+    parser = argparse.ArgumentParser(description="Analyze SDLoRA Sequential Training Results")
+    parser.add_argument('--sdlora_path', type=str, default=None, help='Path to the SDLoRA sequential training results directory')
+    args = parser.parse_args()
+    # sdlora_path = "/home/yongxi/work/O-LoRA/logs_and_outputs/sdlora"
+    sdlora_path = args.sdlora_path 
+
     print("Parsing SDLoRA sequential training results...")
     results = parse_sdlora_sequential_results(sdlora_path)
     
