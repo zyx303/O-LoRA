@@ -29,13 +29,16 @@ def parse_scalings(sd: Dict, adapter_name: str = "default" , task_id=0) -> List[
     """Extract historical_scalings entries to a list of rows: {layer, direction, task, value}."""
     rows: List[Dict] = []
     for k, v in sd.items():
-        if "historical_scalings" not in k:
+        if "shared_historical_scalings" not in k:
             continue
         # ...historical_scalings.dir_0
-        parts = k.split("historical_scalings.")
+        parts = k.split("shared_historical_scalings.")
         if len(parts) < 2:
             continue
         dir_key = parts[1] # dir_0
+        task = dir_key.split("_")[-1]
+        if int(task) > task_id:
+            continue
         # try:
         #     task = int(dir_key.split("_")[1])
         # except Exception:
@@ -75,8 +78,8 @@ def write_csv(rows: List[Dict], out_csv: str):
             })
 
 import debugpy
-debugpy.listen(5678)
-debugpy.wait_for_client()
+# debugpy.listen(5678)
+# debugpy.wait_for_client()
 def main():
     parser = argparse.ArgumentParser(description="Analyze SDLoRA historical_scalings across tasks")
     parser.add_argument("--adapter-dirs", nargs="*", default=[], help="List of adapter directories to analyze, in task order")
@@ -101,6 +104,8 @@ def main():
     all_rows: List[Dict] = []
     for idx, d in enumerate(adapter_dirs):
         sd = load_state_dict(d)
+        # print(sd)
+        # exit(0)
         rows = parse_scalings(sd, adapter_name=args.adapter_name,task_id=idx)
         # 若 state_dict 未显式包含任务号，从目录顺序补齐
         # for r in rows:

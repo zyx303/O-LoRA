@@ -178,11 +178,7 @@ class UIETrainer(Seq2SeqTrainer):
         # # 检查historical_scalings的梯度
         # for name, param in model.named_parameters():
         #     if param.requires_grad:
-        #         if "historical_scalings" in name:
-        #             if param.grad is not None:
-        #                 print(f"Grad for {name}: {param.grad.norm().item()}")
-        #             else:
-        #                 print(f"No grad for {name}")
+        #         print(f"Parameter: {name}, Requires Grad: {param.requires_grad}, Grad Norm: {param.grad.norm() if param.grad is not None else 'No Grad'}")
         
         # print("=== Checking historical_scalings initialization ===")
         # for name, param in model.named_parameters():

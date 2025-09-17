@@ -172,9 +172,8 @@ class InfLoraModel(torch.nn.Module):
 
         if len(self.feature_list) == 0:
             # After First Task
-            new_feature_list_gpu = [] # 暫時儲存 GPU 上的新特徵
+            new_feature_list_gpu = [] 
             for i in range(len(mat_list)):
-                # 將 CPU tensor 上傳到 GPU
                 activation = mat_list[i].to(device)
                 
                 U, S, Vh = torch.linalg.svd(activation, full_matrices=False)
@@ -194,15 +193,12 @@ class InfLoraModel(torch.nn.Module):
                     new_feature_list_gpu.append(U[:, 0:max(r, 1)])
                     self.project_type.append('retain')
             
-            # 3. 計算完成後，將所有 GPU Tensors 下載回 CPU 並轉為 NumPy array
             self.feature_list = [f.cpu().numpy().astype(np.float32) for f in new_feature_list_gpu]
 
         else:
-            # 1. 資料上傳：將 NumPy array 列表轉換為 GPU Tensor 列表
             gpu_feature_list = [torch.from_numpy(f).to(device) for f in self.feature_list]
 
             for i in range(len(mat_list)):
-                # 將 CPU tensor 上傳到 GPU
                 activation = mat_list[i].to(device)
                 feature = gpu_feature_list[i]
 
@@ -262,7 +258,6 @@ class InfLoraModel(torch.nn.Module):
                     Ui, _, _ = torch.linalg.svd(act_feature)
                     gpu_feature_list[i] = Ui[:, :feature.shape[1] - r]
             
-            # 3. 計算完成後，將更新後的 GPU Tensors 列表下載回 CPU 並轉為 NumPy array
             self.feature_list = [f.cpu().numpy().astype(np.float32) for f in gpu_feature_list]
 
     def add_adapter(self, adapter_name, config=None):

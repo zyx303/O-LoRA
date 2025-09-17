@@ -632,13 +632,11 @@ class Linear(nn.Linear, LoraLayer):
                     cur_idx = int(self.num_historical_directions[self.active_adapter].item())
                 direction_key_cur = f"dir_{cur_idx}"
                 historical_scalings = self.shared_historical_scalings_view.get(self.active_adapter, {})
-                scale_param = historical_scalings.get(direction_key_cur, None) if isinstance(historical_scalings, dict) else None
+                scale_param = historical_scalings.get(direction_key_cur, None)
 
                 current_after_A = self.loranew_A[self.active_adapter](x_lora)
                 current_output_raw = self.loranew_B[self.active_adapter](current_after_A)
-                # 与历史方向一致的归一化
-                with torch.no_grad():
-                    norm_factor_cur = torch.norm(self.loranew_A[self.active_adapter].weight) * torch.norm(self.loranew_B[self.active_adapter].weight)
+                norm_factor_cur = torch.norm(self.loranew_A[self.active_adapter].weight) * torch.norm(self.loranew_B[self.active_adapter].weight)
                 if scale_param is not None:
                     current_output = current_output_raw / (norm_factor_cur + 1e-8) * scale_param
                 else:
