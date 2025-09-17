@@ -22,7 +22,12 @@ def find_adapter_file(adapter_dir: str) -> Tuple[str]:
 def load_state_dict(adapter_dir: str) -> Dict:
     path = adapter_dir+'/adapter_model.bin'
     # torch.load can read safetensors via safe_open? For simplicity rely on safetensors when present using safetensors lib.
-    return torch.load(path, map_location="cpu", weights_only=True)
+    try:
+        sd = torch.load(path, map_location="cpu", weights_only=True)
+        return sd
+    except Exception as e:
+        print(f"Failed to load {path}: {e}")
+        return {}
 
 
 def parse_scalings(sd: Dict, adapter_name: str = "default" , task_id=0) -> List[Dict]:

@@ -133,9 +133,9 @@ class SDLoraModel(torch.nn.Module):
     def _init_shared_historical_scalings(self, adapter_name):
         """初始化adapter的共享historical scaling参数"""
         if adapter_name not in self.shared_historical_scalings:
-            # 为每个adapter初始化5个历史方向的可训练scaling参数
+            # 为每个adapter初始化20个历史方向的可训练scaling参数
             adapter_scalings = {}
-            for i in range(5):  # 5个历史方向
+            for i in range(20):  # 20个历史方向
                 direction_key = f"dir_{i}"
                 adapter_scalings[direction_key] = nn.Parameter(
                     torch.tensor([0.8], dtype=torch.float32), 
