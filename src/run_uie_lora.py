@@ -692,6 +692,9 @@ def main():
         model.gradient_checkpointing_enable()
     if model_args.peft_type.upper() == "L2P":
         training_args.regularization = False
+    if model_args.peft_type.upper() == "LORA":
+        training_args.regularization = True
+        print("Using LoRA with regularization on loranew_A and loranew_B")
     trainer = UIETrainer(
         model=model,
         args=training_args,

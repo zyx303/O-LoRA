@@ -128,6 +128,51 @@ def calculate_lora_weight_sum(state_dict, task_id):
     return results,weight
 
 
+def calculate_weight_olora(state_dict) -> dict:
+    """基于 O-LoRA：直接使用每层的 lora_B.weight @ lora_A.weight 作为该层的权重矩阵。
+    从 state_dict 中解析出所有层的 lora_A / lora_B，并按层合并为字典。
+    返回: weight_dict[layer_path] = Tensor(out_features, in_features)
+    """
+    A_map = {}
+    B_map = {}
+    for key, value in state_dict.items():
+        if not isinstance(key, str):
+            continue
+        if key.endswith('.weight'):
+            parts = key.split('.')
+            # 寻找 lora_A / lora_B 的位置
+            if 'lora_A' in parts:
+                i = parts.index('lora_A')
+                layer_path = '.'.join(parts[:i])
+                # 期望形式: <layer_path>.lora_A.<adapter_name>.weight 或 <layer_path>.lora_A.weight
+                A_map[layer_path] = value
+            elif 'lora_B' in parts:
+                i = parts.index('lora_B')
+                layer_path = '.'.join(parts[:i])
+                B_map[layer_path] = value
+
+    weight = {}
+    for layer_path in sorted(set(list(A_map.keys()) + list(B_map.keys()))):
+        if layer_path in A_map and layer_path in B_map:
+            A_w = A_map[layer_path]
+            B_w = B_map[layer_path]
+            if hasattr(A_w, 'weight'):
+                A_w = A_w.weight
+            if hasattr(B_w, 'weight'):
+                B_w = B_w.weight
+            # LoRA 有效权重为 B @ A
+            try:
+                W = torch.matmul(B_w, A_w)
+            except Exception:
+                # 若维度不匹配，尝试转置其中之一（保底处理）
+                if B_w.shape[0] == A_w.shape[0]:
+                    W = torch.matmul(B_w.T, A_w)
+                else:
+                    W = torch.matmul(B_w, A_w.T)
+            weight[layer_path] = W
+    return weight
+
+
 def _flatten_weight_dict_to_vector(weight_dict: dict) -> np.ndarray:
     """将每层的 2D 权重矩阵按层名排序后展平并串联为一个长向量"""
     if not weight_dict:
@@ -269,6 +314,8 @@ def main():
                         help='Path to save/load metadata (order/task_name/dataset) for vectors')
     parser.add_argument('--perplexity', type=float, default=None,
                         help='Optional t-SNE perplexity. If omitted, use heuristic based on sample size')
+    parser.add_argument('--type', type=str, default='sdlora', choices=['sdlora', 'olora'],
+                        help='Select extraction mode: sdlora uses historical_directions; olora uses lora_A/B directly')
     args = parser.parse_args()
     
     base_path = Path(args.path)
@@ -304,8 +351,11 @@ def main():
                 print(f"  加载 {task_name} 的 adapter_model.bin...")
                 try:
                     state_dict = torch.load(adapter_path, map_location='cpu', weights_only=True)
-                    # 计算权重和
-                    weight_results, weight = calculate_lora_weight_sum(state_dict, task_idx)
+                    # 计算权重（根据 type 切换）
+                    if args.type.lower() == 'olora':
+                        weight = calculate_weight_olora(state_dict)
+                    else:
+                        weight_results, weight = calculate_lora_weight_sum(state_dict, task_idx)
                     vec = _flatten_weight_dict_to_vector(weight)
                     if vec is None or vec.size == 0:
                         print(f"  跳过 {task_name}，未提取到有效的 LoRA 权重向量")
@@ -331,7 +381,7 @@ def main():
         meta_entries = [{k: e[k] for k in ('order', 'task_name', 'dataset')} for e in all_task_entries]
         os.makedirs(os.path.dirname(args.vectors_file), exist_ok=True)
         os.makedirs(os.path.dirname(args.meta_file), exist_ok=True)
-        np.savez_compressed(args.vectors_file, vectors=all_vectors)
+        # np.savez_compressed(args.vectors_file, vectors=all_vectors)
         with open(args.meta_file, 'w', encoding='utf-8') as f:
             json.dump(meta_entries, f, ensure_ascii=False, indent=2)
         print(f"已保存向量到: {args.vectors_file}")
@@ -368,8 +418,9 @@ def main():
     overall_csv = fig_dir / 'overall_cluster_assignments.csv'
     with open(overall_csv, 'w', encoding='utf-8') as f:
         f.write('order,task_name,dataset,cluster,tsne_x,tsne_y\n')
-        for i, (e, c) in enumerate(zip(all_task_entries, overall_clusters)):
+        for i, c in enumerate(overall_clusters):
             x, y = all_tsne[i]
+            e = meta_entries[i]
             f.write(f"{e['order']},{e['task_name']},{e['dataset']},{int(c)},{x:.6f},{y:.6f}\n")
     print(f"总体 t-SNE 图已保存: {(fig_dir / 'all_orders_tsne_by_dataset.png').as_posix()} 和 {(fig_dir / 'all_orders_tsne_by_cluster.png').as_posix()}")
     print(f"总体聚类结果 CSV 已保存: {overall_csv.as_posix()}")
