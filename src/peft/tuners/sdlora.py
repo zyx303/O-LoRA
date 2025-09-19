@@ -138,7 +138,7 @@ class SDLoraModel(torch.nn.Module):
             for i in range(20):  # 20个历史方向
                 direction_key = f"dir_{i}"
                 adapter_scalings[direction_key] = nn.Parameter(
-                    torch.tensor([0.8], dtype=torch.float32), 
+                    torch.tensor([1.0], dtype=torch.float32), 
                     requires_grad=True
                 )
             self.shared_historical_scalings[adapter_name] = nn.ParameterDict(adapter_scalings)
@@ -344,10 +344,10 @@ class SDLoraModel(torch.nn.Module):
                 if adapter_name in module.loranew_A and adapter_name in module.lora_A:
                     current_A = module.loranew_A[adapter_name].weight.detach().clone()
                     current_B = module.loranew_B[adapter_name].weight.detach().clone()
-                    initial_scaling = module.scaling[adapter_name] * torch.norm(current_A) * torch.norm(current_B)
+                    # initial_scaling = module.scaling[adapter_name] * torch.norm(current_A) * torch.norm(current_B)
                     
                     # Add current directions as a new historical direction
-                    module.add_historical_direction(adapter_name, current_A, current_B, initial_scaling)
+                    module.add_historical_direction(adapter_name, current_A, current_B)
 
                     # Reset current task's LoRA for next task
                     with torch.no_grad():
@@ -377,7 +377,7 @@ class LoraLayer:
     def __init__(self, in_features: int, out_features: int):
         self.r = {}
         self.lora_alpha = {}
-        self.scaling = nn.ParameterDict({})
+        self.scaling = {} #只有embedding用，恒定
         self.lora_dropout = nn.ModuleDict({})
         # 当前任务的LoRA参数
         self.loranew_A = nn.ModuleDict({})
@@ -440,7 +440,7 @@ class LoraLayer:
                 self.lora_B.update(nn.ModuleDict({adapter_name: nn.Linear(0, self.out_features, bias=False)}))
             
             # self.scaling[adapter_name] = lora_alpha / r if r > 0 else 1.0
-            self.scaling[adapter_name] = nn.Parameter(torch.Tensor([0.8]), requires_grad=True)
+            # self.scaling[adapter_name] = nn.Parameter(torch.Tensor([0.8]), requires_grad=True)
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
         self.to(self.weight.device)
@@ -636,12 +636,12 @@ class Linear(nn.Linear, LoraLayer):
 
                 current_after_A = self.loranew_A[self.active_adapter](x_lora)
                 current_output_raw = self.loranew_B[self.active_adapter](current_after_A)
-                norm_factor_cur = torch.norm(self.loranew_A[self.active_adapter].weight) * torch.norm(self.loranew_B[self.active_adapter].weight)
-                if scale_param is not None:
-                    current_output = current_output_raw / (norm_factor_cur + 1e-8) * scale_param
-                else:
-                    current_output = current_output_raw
-                result = result + current_output
+                # norm_factor_cur = torch.norm(self.loranew_A[self.active_adapter].weight) * torch.norm(self.loranew_B[self.active_adapter].weight)
+                # if scale_param is not None:
+                #     current_output = current_output_raw / (norm_factor_cur + 1e-8) * scale_param
+                # else:
+                #     current_output = current_output_raw
+                result = result + current_output_raw * scale_param
 
         return result.to(previous_dtype)
 

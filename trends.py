@@ -243,13 +243,13 @@ def main():
     # 设置数据路径
     import argparse
     parser = argparse.ArgumentParser(description="Analyze SDLoRA Sequential Training Results")
-    parser.add_argument('--sdlora_path', type=str, default=None, help='Path to the SDLoRA sequential training results directory')
+    parser.add_argument('--root', type=str, default=None, help='Path to the SDLoRA sequential training results directory')
     args = parser.parse_args()
-    # sdlora_path = "/home/yongxi/work/O-LoRA/logs_and_outputs/sdlora"
-    sdlora_path = args.sdlora_path 
+    # root = "/home/yongxi/work/O-LoRA/logs_and_outputs/sdlora"
+    root = args.root 
 
     print("Parsing SDLoRA sequential training results...")
-    results = parse_sdlora_sequential_results(sdlora_path)
+    results = parse_sdlora_sequential_results(root)
     
     if not results:
         print("No valid result data found!")

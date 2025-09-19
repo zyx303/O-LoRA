@@ -713,79 +713,79 @@ def main():
         elif last_checkpoint is not None:
             checkpoint = last_checkpoint
 
-        if model_args.peft_type.upper() == "SDLORA":
-            historical_scaling_params = []
-            other_params = []
+        # if model_args.peft_type.upper() == "SDLORA":
+        #     historical_scaling_params = []
+        #     other_params = []
             
-            for name, param in model.named_parameters():
-                if param.requires_grad:
-                    if "historical_scalings" in name:
-                        historical_scaling_params.append(param)
-                    else:
-                        other_params.append(param)
+        #     for name, param in model.named_parameters():
+        #         if param.requires_grad:
+        #             if "historical_scalings" in name:
+        #                 historical_scaling_params.append(param)
+        #             else:
+        #                 other_params.append(param)
             
-            # 创建参数组
-            param_groups = [
-                {
-                    'params': other_params,
-                    'lr': 1e-3,
-                    'weight_decay': 0.01
-                },
-                {
-                    'params': historical_scaling_params,
-                    'lr': 0.01,
-                    'weight_decay': 0
-                }
-            ]
+        #     # 创建参数组
+        #     param_groups = [
+        #         {
+        #             'params': historical_scaling_params,
+        #             'lr': 0.01,
+        #             'weight_decay': 0.0
+        #         },
+        #         {
+        #             'params': other_params,
+        #             'lr': 1e-3,
+        #             'weight_decay': 0.0
+        #         }
+        #     ]
             
-            from transformers import AdamW,get_constant_schedule,get_linear_schedule_with_warmup
-            optimizer = AdamW(param_groups)
+        #     from transformers import AdamW,get_constant_schedule,get_linear_schedule_with_warmup
+        #     optimizer = AdamW(param_groups)
 
-            scheduler = get_constant_schedule(optimizer)
+        #     scheduler = get_constant_schedule(optimizer)
             
-            print(f"历史scaling参数数量: {len(historical_scaling_params)}")
-            print(f"其他参数数量: {len(other_params)}")
-            # # 创建自定义调度器
-            # class CustomScheduler:
-            #     def __init__(self, optimizer, num_training_steps):
-            #         self.optimizer = optimizer
-            #         # 其他参数使用 constant scheduler
-            #         self.scheduler_other = get_constant_schedule(optimizer)
-            #         # historical_scaling_params 使用线性衰减 scheduler
-            #         self.scheduler_historical = get_linear_schedule_with_warmup(
-            #             optimizer, 
-            #             num_warmup_steps=100,  
-            #             num_training_steps=num_training_steps
-            #         )
+        #     print(f"历史scaling参数数量: {len(historical_scaling_params)}")
+        #     print(f"其他参数数量: {len(other_params)}")
+        #     # # 创建自定义调度器
+        #     # class CustomScheduler:
+        #     #     def __init__(self, optimizer, num_training_steps):
+        #     #         self.optimizer = optimizer
+        #     #         # 其他参数使用 constant scheduler
+        #     #         self.scheduler_other = get_constant_schedule(optimizer)
+        #     #         # historical_scaling_params 使用线性衰减 scheduler
+        #     #         self.scheduler_historical = get_linear_schedule_with_warmup(
+        #     #             optimizer, 
+        #     #             num_warmup_steps=100,  
+        #     #             num_training_steps=num_training_steps
+        #     #         )
                     
-            #     def step(self):
-            #         current_lr_other = self.scheduler_other.get_last_lr()[0]
-            #         current_lr_historical = self.scheduler_historical.get_last_lr()[0]
+        #     #     def step(self):
+        #     #         current_lr_other = self.scheduler_other.get_last_lr()[0]
+        #     #         current_lr_historical = self.scheduler_historical.get_last_lr()[0]
                     
-            #         self.optimizer.param_groups[0]['lr'] = current_lr_other
-            #         self.optimizer.param_groups[1]['lr'] = current_lr_historical
+        #     #         self.optimizer.param_groups[0]['lr'] = current_lr_other
+        #     #         self.optimizer.param_groups[1]['lr'] = current_lr_historical
 
-            #         self.scheduler_other.step()
-            #         self.scheduler_historical.step()
+        #     #         self.scheduler_other.step()
+        #     #         self.scheduler_historical.step()
                     
-            #     def get_last_lr(self):
-            #         return [self.scheduler_other.get_last_lr()[0], self.scheduler_historical.get_last_lr()[0]]
+        #     #     def get_last_lr(self):
+        #     #         return [self.scheduler_other.get_last_lr()[0], self.scheduler_historical.get_last_lr()[0]]
         
-            # # 计算训练步数
-            # total_steps = len(trainer.get_train_dataloader()) * training_args.num_train_epochs
-            # custom_scheduler = CustomScheduler(optimizer, total_steps)
+        #     # # 计算训练步数
+        #     # total_steps = len(trainer.get_train_dataloader()) * training_args.num_train_epochs
+        #     # custom_scheduler = CustomScheduler(optimizer, total_steps)
 
-            # 使用线性预热和线性衰减的调度器
-            # num_training_steps = len(trainer.get_train_dataloader()) * training_args.num_train_epochs
-            # print('num_training_steps: ', num_training_steps)
-            # custom_scheduler = get_linear_schedule_with_warmup(
-            #     optimizer,
-            #     num_warmup_steps=20,
-            #     num_training_steps=num_training_steps
-            # )
+        #     # 使用线性预热和线性衰减的调度器
+        #     # num_training_steps = len(trainer.get_train_dataloader()) * training_args.num_train_epochs
+        #     # print('num_training_steps: ', num_training_steps)
+        #     # custom_scheduler = get_linear_schedule_with_warmup(
+        #     #     optimizer,
+        #     #     num_warmup_steps=20,
+        #     #     num_training_steps=num_training_steps
+        #     # )
             
-            trainer.optimizer = optimizer
-            trainer.lr_scheduler = scheduler
+        #     trainer.optimizer = optimizer
+        #     trainer.lr_scheduler = scheduler
             # trainer.lr_scheduler = custom_scheduler
 
 
