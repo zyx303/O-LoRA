@@ -331,7 +331,7 @@ def main():
         meta_entries = [{k: e[k] for k in ('order', 'task_name', 'dataset')} for e in all_task_entries]
         os.makedirs(os.path.dirname(args.vectors_file), exist_ok=True)
         os.makedirs(os.path.dirname(args.meta_file), exist_ok=True)
-        np.savez_compressed(args.vectors_file, vectors=all_vectors)
+        # np.savez_compressed(args.vectors_file, vectors=all_vectors)
         with open(args.meta_file, 'w', encoding='utf-8') as f:
             json.dump(meta_entries, f, ensure_ascii=False, indent=2)
         print(f"已保存向量到: {args.vectors_file}")
