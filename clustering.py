@@ -162,18 +162,27 @@ def _infer_dataset_name(task_dir_name: str) -> str:
     return name
 
 
-def _tsne_2d(vectors: np.ndarray, metric: str = 'cosine', random_state: int = 42) -> np.ndarray:
+def _tsne_2d(vectors: np.ndarray, metric: str = 'cosine', random_state: int = 42, perplexity: Optional[float] = None) -> np.ndarray:
     n = vectors.shape[0]
     # 经验设定: perplexity < n_samples/3, 且不小于 5
-    perplexity = max(5, min(30, max(5, n // 3)))
+    if n <= 2:
+        if n == 1:
+            return np.array([[0.0, 0.0]], dtype=np.float32)
+        return np.array([[-1.0, 0.0], [1.0, 0.0]], dtype=np.float32)
+    if perplexity is None:
+        p = max(5, min(30, max(5, n // 3)))
+    else:
+        p = float(perplexity)
+    p = min(max(2.0, p), n - 1)
     if metric == 'cosine':
         # 使用余弦距离矩阵：1 - 余弦相似度
         sim = cosine_similarity(vectors)
         dist = 1.0 - np.clip(sim, -1.0, 1.0)
-        tsne = TSNE(n_components=2, metric='precomputed', random_state=random_state, perplexity=perplexity, init='pca')
+        # 预计算距离时，init 不支持 pca，需使用 'random' 或提供初始坐标
+        tsne = TSNE(n_components=2, metric='precomputed', random_state=random_state, perplexity=p, init='random')
         return tsne.fit_transform(dist)
     else:
-        tsne = TSNE(n_components=2, metric='euclidean', random_state=random_state, perplexity=perplexity, init='pca')
+        tsne = TSNE(n_components=2, metric='euclidean', random_state=random_state, perplexity=p, init='pca')
         return tsne.fit_transform(vectors)
 
 
@@ -252,6 +261,14 @@ def main():
                         help="Output file to save analysis results (text, optional)")
     parser.add_argument('--figdir', type=str, default="/home/yongxi/work/O-LoRA/analyze/figs",
                         help="Directory to save t-SNE plots and clustering results")
+    parser.add_argument('--extract_vectors', action='store_true',
+                        help='If set, read adapters and save flattened weight vectors to file; otherwise load from file and only run analysis')
+    parser.add_argument('--vectors_file', type=str, default="/home/yongxi/work/O-LoRA/analyze/weight_vectors.npz",
+                        help='Path to save/load flattened weight vectors (npz with key "vectors")')
+    parser.add_argument('--meta_file', type=str, default="/home/yongxi/work/O-LoRA/analyze/weight_vectors_meta.json",
+                        help='Path to save/load metadata (order/task_name/dataset) for vectors')
+    parser.add_argument('--perplexity', type=float, default=None,
+                        help='Optional t-SNE perplexity. If omitted, use heuristic based on sample size')
     args = parser.parse_args()
     
     base_path = Path(args.path)
@@ -261,78 +278,86 @@ def main():
     fig_dir = Path(args.figdir)
     fig_dir.mkdir(parents=True, exist_ok=True)
     
-    all_results = {}
-    # 收集所有任务的向量与元信息
-    all_task_entries = []  # {order, task_name, dataset, vector}
-    per_order_entries = {}
-    
-    # 遍历每个order目录
-    for order_dir in sorted(base_path.glob('order_*')):
-        order_name = order_dir.name
-        outputs_dir = order_dir / 'outputs'
-        if not outputs_dir.exists():
-            continue
-        
-        print(f"\n处理 {order_name}...")
-        order_results = {}
-        
-        # 按任务顺序处理
-        task_dirs = sorted([d for d in outputs_dir.glob('*') if d.is_dir()], 
-                          key=lambda x: int(x.name.split('-')[0]))
-        
-        for task_idx, task_dir in enumerate(task_dirs):
-            task_name = task_dir.name
-            adapter_path = task_dir / 'adapter' / 'adapter_model.bin'
-            
-            if not adapter_path.exists():
-                print(f"  跳过 {task_name}，未找到 adapter_model.bin")
+    # 根据参数决定：提取并保存，或从文件加载
+    meta_entries: List[dict] = []
+    all_vectors: Optional[np.ndarray] = None
+
+    if args.extract_vectors:
+        all_results = {}
+        all_task_entries = []  # 将被保存为 meta_entries
+        # 遍历每个order目录
+        for order_dir in sorted(base_path.glob('order_*')):
+            order_name = order_dir.name
+            outputs_dir = order_dir / 'outputs'
+            if not outputs_dir.exists():
                 continue
-            
-            print(f"  加载 {task_name} 的 adapter_model.bin...")
-            
-            try:
-                state_dict = torch.load(adapter_path, map_location='cpu', weights_only=True)
-                
-                # 计算权重和
-                weight_results, weight = calculate_lora_weight_sum(state_dict, task_idx)
-                
-                # # 打印统计信息
-                # print_weight_statistics(weight_results, task_name)
-                
-                # order_results[task_name] = weight_results
-                vec = _flatten_weight_dict_to_vector(weight)
-                if vec is None or vec.size == 0:
-                    print(f"  跳过 {task_name}，未提取到有效的 LoRA 权重向量")
+            print(f"\n处理 {order_name}...")
+            order_results = {}
+            # 按任务顺序处理
+            task_dirs = sorted([d for d in outputs_dir.glob('*') if d.is_dir()], key=lambda x: int(x.name.split('-')[0]))
+            for task_idx, task_dir in enumerate(task_dirs):
+                task_name = task_dir.name
+                adapter_path = task_dir / 'adapter' / 'adapter_model.bin'
+                if not adapter_path.exists():
+                    print(f"  跳过 {task_name}，未找到 adapter_model.bin")
                     continue
-                dataset = _infer_dataset_name(task_name)
-                entry = {
-                    'order': order_name, #order_1
-                    'task_name': task_name,# 1-dbpedia
-                    'dataset': dataset,# dbpedia
-                    'vector': vec, # weight vector
-                }
-                all_task_entries.append(entry)
-                per_order_entries.setdefault(order_name, []).append(entry)
-                
-            except Exception as e:
-                print(f"  处理 {task_name} 时出错: {e}")
-                continue
-        
-        all_results[order_name] = order_results
-    
-    # 若未收集到任何任务，直接结束
-    if not all_task_entries:
-        print("未收集到任何任务向量，结束。")
-        return
+                print(f"  加载 {task_name} 的 adapter_model.bin...")
+                try:
+                    state_dict = torch.load(adapter_path, map_location='cpu', weights_only=True)
+                    # 计算权重和
+                    weight_results, weight = calculate_lora_weight_sum(state_dict, task_idx)
+                    vec = _flatten_weight_dict_to_vector(weight)
+                    if vec is None or vec.size == 0:
+                        print(f"  跳过 {task_name}，未提取到有效的 LoRA 权重向量")
+                        continue
+                    dataset = _infer_dataset_name(task_name)
+                    entry = {
+                        'order': order_name,
+                        'task_name': task_name,
+                        'dataset': dataset,
+                    }
+                    all_task_entries.append({'vector': vec, **entry})
+                except Exception as e:
+                    print(f"  处理 {task_name} 时出错: {e}")
+                    continue
+            all_results[order_name] = order_results
+
+        if not all_task_entries:
+            print("未收集到任何任务向量，结束。")
+            return
+
+        # 组装矩阵并保存
+        all_vectors = np.stack([e['vector'] for e in all_task_entries], axis=0)
+        meta_entries = [{k: e[k] for k in ('order', 'task_name', 'dataset')} for e in all_task_entries]
+        os.makedirs(os.path.dirname(args.vectors_file), exist_ok=True)
+        os.makedirs(os.path.dirname(args.meta_file), exist_ok=True)
+        np.savez_compressed(args.vectors_file, vectors=all_vectors)
+        with open(args.meta_file, 'w', encoding='utf-8') as f:
+            json.dump(meta_entries, f, ensure_ascii=False, indent=2)
+        print(f"已保存向量到: {args.vectors_file}")
+        print(f"已保存元信息到: {args.meta_file}")
+    else:
+        # 从文件加载
+        if not (os.path.exists(args.vectors_file) and os.path.exists(args.meta_file)):
+            print("未找到向量或元信息文件，请先使用 --extract_vectors 生成。")
+            print(f"期望文件: {args.vectors_file} 与 {args.meta_file}")
+            return
+        data = np.load(args.vectors_file)
+        if 'vectors' not in data:
+            print(f"{args.vectors_file} 中未找到 'vectors' 键")
+            return
+        all_vectors = data['vectors']
+        with open(args.meta_file, 'r', encoding='utf-8') as f:
+            meta_entries = json.load(f)
+        print(f"已从文件加载 {all_vectors.shape[0]} 个任务向量。")
 
     # 组合所有任务进行一次总体聚类与可视化
     print("\n构建总体任务矩阵并使用余弦相似度进行聚类与 t-SNE...")
-    all_vectors = np.stack([e['vector'] for e in all_task_entries], axis=0)
-    all_datasets = [e['dataset'] for e in all_task_entries]
-    all_annotations = [f"{e['order']}\n{e['task_name']}" for e in all_task_entries]
+    all_datasets = [e['dataset'] for e in meta_entries]
+    all_annotations = [f"{e['order']}\n{e['task_name']}" for e in meta_entries]
     n_clusters_overall = len(set(all_datasets))
     # t-SNE (cosine metric)
-    all_tsne = _tsne_2d(all_vectors, metric='cosine', random_state=42)
+    all_tsne = _tsne_2d(all_vectors, metric='cosine', random_state=42, perplexity=args.perplexity)
     _plot_tsne(all_tsne, all_datasets, f"All Orders t-SNE by Dataset (cosine)", fig_dir / "all_orders_tsne_by_dataset.png", annotations=all_annotations)
     # 谱聚类（cosine affinity）
     overall_clusters = _spectral_cluster_cosine(all_vectors, n_clusters=n_clusters_overall, random_state=42)
@@ -350,24 +375,28 @@ def main():
     print(f"总体聚类结果 CSV 已保存: {overall_csv.as_posix()}")
 
     # 每个 order 单独聚类与可视化
-    for order_name, entries in per_order_entries.items():
-        if len(entries) < 2:
+    # 为每个 order 单独聚类与可视化
+    orders = sorted(list(set([e['order'] for e in meta_entries])))
+    for order_name in orders:
+        idxs = [i for i, e in enumerate(meta_entries) if e['order'] == order_name]
+        if len(idxs) < 2:
             continue
         print(f"处理 {order_name} 的单独聚类与可视化...")
-        vectors = np.stack([e['vector'] for e in entries], axis=0)
-        datasets = [e['dataset'] for e in entries]
-        annotations = [e['task_name'] for e in entries]
+        vectors = all_vectors[idxs]
+        datasets = [meta_entries[i]['dataset'] for i in idxs]
+        annotations = [meta_entries[i]['task_name'] for i in idxs]
         n_clusters = len(set(datasets))
-        tsne_points = _tsne_2d(vectors, metric='cosine', random_state=42)
+        tsne_points = _tsne_2d(vectors, metric='cosine', random_state=42, perplexity=args.perplexity)
         _plot_tsne(tsne_points, datasets, f"{order_name} t-SNE by Dataset (cosine)", fig_dir / f"{order_name}_tsne_by_dataset.png", annotations=annotations)
         clusters = _spectral_cluster_cosine(vectors, n_clusters=n_clusters, random_state=42)
         _plot_tsne(tsne_points, [str(c) for c in clusters], f"{order_name} t-SNE by Cluster (cosine)", fig_dir / f"{order_name}_tsne_by_cluster.png", annotations=annotations)
         csv_path = fig_dir / f"{order_name}_cluster_assignments.csv"
         with open(csv_path, 'w', encoding='utf-8') as f:
             f.write('task_name,dataset,cluster,tsne_x,tsne_y\n')
-            for i, (e, c) in enumerate(zip(entries, clusters)):
-                x, y = tsne_points[i]
-                f.write(f"{e['task_name']},{e['dataset']},{int(c)},{x:.6f},{y:.6f}\n")
+            for i_local, c in enumerate(clusters):
+                x, y = tsne_points[i_local]
+                meta_i = meta_entries[idxs[i_local]]
+                f.write(f"{meta_i['task_name']},{meta_i['dataset']},{int(c)},{x:.6f},{y:.6f}\n")
         print(f"  {order_name} t-SNE 图已保存: {(fig_dir / f'{order_name}_tsne_by_dataset.png').as_posix()} 和 {(fig_dir / f'{order_name}_tsne_by_cluster.png').as_posix()}")
         print(f"  {order_name} 聚类结果 CSV 已保存: {csv_path.as_posix()}")
 
