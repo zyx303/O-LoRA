@@ -6,18 +6,17 @@ export TRANSFORMERS_CACHE=/data/yongxi/.cache/huggingface
 
 port=$(shuf -i25000-30000 -n1)
 
-# bash scripts/order_2.sh> logs_and_outputs/order_2/logs/train_and_infer.log 2>&1 &
+# bash scripts/order_2.sh> exp/olora/order_2/logs/train_and_infer.log 2>&1 &
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
-   --do_predict \
    --predict_with_generate \
    --model_name_or_path initial_model/t5-large \
    --data_dir CL_Benchmark \
    --task_config_dir configs/order2_configs/dbpedia \
    --instruction_file configs/instruction_config.json \
    --instruction_strategy single \
-   --output_dir logs_and_outputs/order_2/outputs/1-dbpedia \
+   --output_dir exp/olora/order_2/outputs/1-dbpedia \
    --per_device_train_batch_size 16 \
    --per_device_eval_batch_size 128 \
    --gradient_accumulation_steps 1 \
@@ -46,14 +45,13 @@ sleep 5
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
-   --do_predict \
    --predict_with_generate \
-   --model_name_or_path logs_and_outputs/order_2/outputs/1-dbpedia/adapter \
+   --model_name_or_path exp/olora/order_2/outputs/1-dbpedia/adapter \
    --data_dir CL_Benchmark \
    --task_config_dir configs/order2_configs/amazon \
    --instruction_file configs/instruction_config.json \
    --instruction_strategy single \
-   --output_dir logs_and_outputs/order_2/outputs/2-amazon \
+   --output_dir exp/olora/order_2/outputs/2-amazon \
    --per_device_train_batch_size 16 \
    --per_device_eval_batch_size 128 \
    --gradient_accumulation_steps 1 \
@@ -82,14 +80,13 @@ sleep 5
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
-   --do_predict \
    --predict_with_generate \
-   --model_name_or_path logs_and_outputs/order_2/outputs/2-amazon/adapter \
+   --model_name_or_path exp/olora/order_2/outputs/2-amazon/adapter \
    --data_dir CL_Benchmark \
    --task_config_dir configs/order2_configs/agnews \
    --instruction_file configs/instruction_config.json \
    --instruction_strategy single \
-   --output_dir logs_and_outputs/order_2/outputs/3-agnews \
+   --output_dir exp/olora/order_2/outputs/3-agnews \
    --per_device_train_batch_size 16 \
    --per_device_eval_batch_size 128 \
    --gradient_accumulation_steps 1 \
@@ -118,14 +115,13 @@ sleep 5
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
-   --do_predict \
    --predict_with_generate \
-   --model_name_or_path logs_and_outputs/order_2/outputs/3-agnews/adapter \
+   --model_name_or_path exp/olora/order_2/outputs/3-agnews/adapter \
    --data_dir CL_Benchmark \
    --task_config_dir configs/order2_configs/yahoo \
    --instruction_file configs/instruction_config.json \
    --instruction_strategy single \
-   --output_dir logs_and_outputs/order_2/outputs/4-yahoo \
+   --output_dir exp/olora/order_2/outputs/4-yahoo \
    --per_device_train_batch_size 16 \
    --per_device_eval_batch_size 128 \
    --gradient_accumulation_steps 1 \

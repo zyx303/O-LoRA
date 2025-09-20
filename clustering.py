@@ -294,6 +294,8 @@ def print_weight_statistics(results, task_name):
     print(f"      处理层数: {total_layers}")
     print(f"      平均每层权重和: {total_sum/total_layers:.6f}" if total_layers > 0 else "      平均每层权重和: 0")
 
+
+
 import debugpy
 # debugpy.listen(5678)
 # print("Waiting for debugger attach...")
