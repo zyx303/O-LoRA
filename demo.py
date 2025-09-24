@@ -1,6 +1,6 @@
 import torch
 import pandas as pd
-adapters_weights = torch.load('/home/yongxi/work/O-LoRA/exp/sdlora/order_2/outputs/3-agnews/adapter/adapter_model.bin', map_location='cpu')
+adapters_weights = torch.load('/home/yongxi/work/O-LoRA/exp/sdlora/order_2/outputs/1-dbpedia/adapter/adapter_model.bin', map_location='cpu')
 # adapters_weights = torch.load('/home/yongxi/work/O-LoRA/exp/debug/order_1/outputs/1-dbpedia/adapter/adapter_model.bin', map_location='cpu')
 # print(adapters_weights.keys())
 for k,v in adapters_weights.items():

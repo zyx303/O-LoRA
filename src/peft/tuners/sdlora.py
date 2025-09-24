@@ -138,7 +138,7 @@ class SDLoraModel(torch.nn.Module):
             for i in range(20):  # 20个历史方向
                 direction_key = f"dir_{i}"
                 adapter_scalings[direction_key] = nn.Parameter(
-                    torch.tensor([1.0], dtype=torch.float32), 
+                    torch.tensor([0.8], dtype=torch.float32), 
                     requires_grad=True
                 )
             self.shared_historical_scalings[adapter_name] = nn.ParameterDict(adapter_scalings)

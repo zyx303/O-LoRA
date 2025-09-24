@@ -307,7 +307,7 @@ for order_name, entries in orders.items():
               r'$2 \times ||W_i - W_j||_F / (||W_i||_F + ||W_j||_F)$')
     
     # 添加颜色条
-    cbar = plt.colorbar(im，ticks=[0, 0.2, 0.4, 0.6, 0.8, 1.0])
+    cbar = plt.colorbar(im,ticks=[0, 0.2, 0.4, 0.6, 0.8, 1.0])
     cbar.set_label('Similarity Score')
     
     # 在每个单元格中添加数值
@@ -321,7 +321,7 @@ for order_name, entries in orders.items():
     # 保存图片
     output_dir = Path(args.output)
     # output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"llama_{args.type}_{order_name}_similarity_heatmap.png"
+    output_path = output_dir / f"{args.type}_{order_name}_similarity_heatmap.png"
     plt.savefig(output_path, dpi=200, bbox_inches='tight')
     plt.close()
     

@@ -9,9 +9,8 @@ port=$(shuf -i25000-30000 -n1)
 
 ############!!!!!! bash scripts/order_2_sdlora.sh> exp/sdlora/order_2/logs/train_and_infer.log 2>&1 &
 
-CUDA_VISIBLE_DEVICES=5 deepspeed --master_port $port src/run_uie_lora.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
-   --do_predict \
    --predict_with_generate \
    --model_name_or_path initial_model/t5-large \
    --data_dir CL_Benchmark \
@@ -44,9 +43,8 @@ CUDA_VISIBLE_DEVICES=5 deepspeed --master_port $port src/run_uie_lora.py \
 
 sleep 5
 
-CUDA_VISIBLE_DEVICES=5 deepspeed --master_port $port src/run_uie_lora.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
-   --do_predict \
    --predict_with_generate \
    --model_name_or_path exp/sdlora/order_2/outputs/1-dbpedia/adapter \
    --data_dir CL_Benchmark \
@@ -81,9 +79,8 @@ CUDA_VISIBLE_DEVICES=5 deepspeed --master_port $port src/run_uie_lora.py \
 
 sleep 5
 
-CUDA_VISIBLE_DEVICES=5 deepspeed --master_port $port src/run_uie_lora.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
-   --do_predict \
    --predict_with_generate \
    --model_name_or_path exp/sdlora/order_2/outputs/2-amazon/adapter \
    --data_dir CL_Benchmark \
@@ -118,7 +115,7 @@ CUDA_VISIBLE_DEVICES=5 deepspeed --master_port $port src/run_uie_lora.py \
 
 sleep 5
 
-CUDA_VISIBLE_DEVICES=5 deepspeed --master_port $port src/run_uie_lora.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
    --do_predict \
    --predict_with_generate \

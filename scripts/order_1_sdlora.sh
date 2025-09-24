@@ -10,7 +10,6 @@ port=$(shuf -i25000-30000 -n1)
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
-   --do_predict \
    --predict_with_generate \
    --model_name_or_path initial_model/t5-large \
    --data_dir CL_Benchmark \
@@ -32,7 +31,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --add_dataset_name True \
    --overwrite_output_dir \
    --overwrite_cache \
-   --lr_scheduler_type linear \
+   --lr_scheduler_type constant \
    --warmup_steps 0 \
    --logging_strategy steps \
    --logging_steps 10 \
@@ -47,7 +46,6 @@ sleep 5
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
-   --do_predict \
    --predict_with_generate \
    --model_name_or_path exp/sdlora/order_1/outputs/1-dbpedia/adapter \
    --data_dir CL_Benchmark \
@@ -68,7 +66,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --add_dataset_name True \
    --overwrite_output_dir \
    --overwrite_cache \
-   --lr_scheduler_type linear \
+   --lr_scheduler_type constant \
    --warmup_steps 0 \
    --logging_strategy steps \
    --logging_steps 10 \
@@ -83,7 +81,6 @@ sleep 5
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
-   --do_predict \
    --predict_with_generate \
    --model_name_or_path exp/sdlora/order_1/outputs/2-amazon/adapter \
    --data_dir CL_Benchmark \
@@ -105,7 +102,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --add_dataset_name True \
    --overwrite_output_dir \
    --overwrite_cache \
-   --lr_scheduler_type linear \
+   --lr_scheduler_type constant \
    --warmup_steps 0 \
    --logging_strategy steps \
    --logging_steps 10 \
@@ -142,7 +139,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --add_dataset_name True \
    --overwrite_output_dir \
    --overwrite_cache \
-   --lr_scheduler_type linear \
+   --lr_scheduler_type constant \
    --warmup_steps 0 \
    --logging_strategy steps \
    --logging_steps 10 \

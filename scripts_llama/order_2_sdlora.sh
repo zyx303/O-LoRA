@@ -8,7 +8,7 @@ port=$(shuf -i25000-30000 -n1)
 
 ##########!!!!!!! bash scripts_llama/order_2_sdlora.sh> exp/llama/sdlora/order_2/logs/train_and_infer.log 2>&1 &
 
-CUDA_VISIBLE_DEVICES=1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
    --predict_with_generate \
    --model_name_or_path initial_model/llama \
@@ -45,7 +45,7 @@ CUDA_VISIBLE_DEVICES=1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
 
 sleep 5
 
-CUDA_VISIBLE_DEVICES=1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
    --predict_with_generate \
    --model_name_or_path exp/llama/sdlora/order_2/outputs/1-dbpedia/adapter \
@@ -82,7 +82,7 @@ CUDA_VISIBLE_DEVICES=1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
 
 sleep 5
 
-CUDA_VISIBLE_DEVICES=1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
    --predict_with_generate \
    --model_name_or_path exp/llama/sdlora/order_2/outputs/2-amazon/adapter \
@@ -119,7 +119,7 @@ CUDA_VISIBLE_DEVICES=1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
 
 sleep 5
 
-CUDA_VISIBLE_DEVICES=1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
    --do_predict \
    --predict_with_generate \

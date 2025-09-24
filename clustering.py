@@ -294,12 +294,78 @@ def print_weight_statistics(results, task_name):
     print(f"      处理层数: {total_layers}")
     print(f"      平均每层权重和: {total_sum/total_layers:.6f}" if total_layers > 0 else "      平均每层权重和: 0")
 
-
+def calculate_cross_task_similarity(all_task_entries, target_order, target_task):
+    """计算特定任务与所有其他任务的相似性"""
+    
+    # 找到目标任务
+    target_entry = None
+    for entry in all_task_entries:
+        if entry['order'] == target_order and target_task in entry['task_name']:
+            target_entry = entry
+            break
+    
+    if target_entry is None:
+        print(f"未找到目标任务: {target_order} - {target_task}")
+        return
+    
+    target_vector = target_entry['vector']
+    similarities = []
+    
+    print(f"\n计算 {target_order} {target_entry['task_name']} 与所有其他任务的相似性:")
+    print("=" * 80)
+    print(f"{'Order':<15} {'Task Name':<25} {'Similarity':<12} {'Distance Metric'}")
+    print("-" * 80)
+    
+    for entry in all_task_entries:
+        # 跳过自己
+        if entry['order'] == target_order and entry['task_name'] == target_entry['task_name']:
+            continue
+            
+        other_vector = entry['vector']
+        
+        # 计算范数
+        norm_target = np.linalg.norm(target_vector)
+        norm_other = np.linalg.norm(other_vector)
+        diff_norm = np.linalg.norm(target_vector - other_vector)
+        
+        # 计算相似度: 2||w_i - w_j|| / (||w_i|| + ||w_j||)
+        if norm_target + norm_other > 1e-8:
+            similarity = 2 * diff_norm / (norm_target + norm_other)
+        else:
+            similarity = 0.0
+        
+        similarities.append({
+            'order': entry['order'],
+            'task_name': entry['task_name'],
+            'similarity': similarity,
+            'diff_norm': diff_norm,
+            'norm_target': norm_target,
+            'norm_other': norm_other
+        })
+        
+        print(f"{entry['order']:<15} {entry['task_name']:<25} {similarity:<12.4f} {diff_norm:<12.4f}")
+    
+    # 按相似度排序（相似度越小越相似）
+    similarities.sort(key=lambda x: x['similarity'])
+    
+    print("\n最相似的任务 (相似度从小到大):")
+    print("-" * 60)
+    for i, sim in enumerate(similarities[:10]):  # 显示前10个最相似的
+        print(f"{i+1:2d}. {sim['order']:<15} {sim['task_name']:<25} {sim['similarity']:.6f}")
+    
+    print("\n最不相似的任务 (相似度从大到小):")
+    print("-" * 60)
+    for i, sim in enumerate(similarities[-10:]):  # 显示后10个最不相似的
+        print(f"{i+1:2d}. {sim['order']:<15} {sim['task_name']:<25} {sim['similarity']:.6f}")
+    
+    return similarities
 
 import debugpy
-# debugpy.listen(5678)
-# print("Waiting for debugger attach...")
-# debugpy.wait_for_client()
+import os 
+if os.getenv("debug", "0") == "1":
+    debugpy.listen(5678)
+    print("Waiting for debugger attach...")
+    debugpy.wait_for_client()
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--path', type=str, default="/home/yongxi/work/O-LoRA/exp/sdlora/", 
@@ -308,7 +374,7 @@ def main():
                         help="Output file to save analysis results (text, optional)")
     parser.add_argument('--figdir', type=str, default="/home/yongxi/work/O-LoRA/analyze/figs",
                         help="Directory to save t-SNE plots and clustering results")
-    parser.add_argument('--extract_vectors', action='store_true',
+    parser.add_argument('--extract_vectors', action='store_true',default=True,
                         help='If set, read adapters and save flattened weight vectors to file; otherwise load from file and only run analysis')
     parser.add_argument('--vectors_file', type=str, default="/home/yongxi/work/O-LoRA/analyze/weight_vectors.npz",
                         help='Path to save/load flattened weight vectors (npz with key "vectors")')
@@ -381,13 +447,13 @@ def main():
         # 组装矩阵并保存
         all_vectors = np.stack([e['vector'] for e in all_task_entries], axis=0)
         meta_entries = [{k: e[k] for k in ('order', 'task_name', 'dataset')} for e in all_task_entries]
-        os.makedirs(os.path.dirname(args.vectors_file), exist_ok=True)
-        os.makedirs(os.path.dirname(args.meta_file), exist_ok=True)
+        # os.makedirs(os.path.dirname(args.vectors_file), exist_ok=True)
+        # os.makedirs(os.path.dirname(args.meta_file), exist_ok=True)
         # np.savez_compressed(args.vectors_file, vectors=all_vectors)
-        with open(args.meta_file, 'w', encoding='utf-8') as f:
-            json.dump(meta_entries, f, ensure_ascii=False, indent=2)
-        print(f"已保存向量到: {args.vectors_file}")
-        print(f"已保存元信息到: {args.meta_file}")
+        # with open(args.meta_file, 'w', encoding='utf-8') as f:
+        #     json.dump(meta_entries, f, ensure_ascii=False, indent=2)
+        # print(f"已保存向量到: {args.vectors_file}")
+        # print(f"已保存元信息到: {args.meta_file}")
     else:
         # 从文件加载
         if not (os.path.exists(args.vectors_file) and os.path.exists(args.meta_file)):
@@ -408,13 +474,18 @@ def main():
     all_datasets = [e['dataset'] for e in meta_entries]
     all_annotations = [f"{e['order']}\n{e['task_name']}" for e in meta_entries]
     n_clusters_overall = len(set(all_datasets))
+
+
+    # calculate_cross_task_similarity(all_task_entries, "order_1", "dbpedia")
+
+
     # t-SNE (cosine metric)
     all_tsne = _tsne_2d(all_vectors, metric='cosine', random_state=42, perplexity=args.perplexity)
-    _plot_tsne(all_tsne, all_datasets, f"All Orders t-SNE by Dataset (cosine)", fig_dir / "all_orders_tsne_by_dataset.png", annotations=all_annotations)
+    _plot_tsne(all_tsne, all_datasets, f"All Orders t-SNE by Dataset (cosine)", fig_dir / f"{args.type}_all_orders_tsne_by_dataset.png", annotations=all_annotations)
     # 谱聚类（cosine affinity）
     overall_clusters = _spectral_cluster_cosine(all_vectors, n_clusters=n_clusters_overall, random_state=42)
     # 以聚类标签着色的 t-SNE
-    _plot_tsne(all_tsne, [str(c) for c in overall_clusters], f"All Orders t-SNE by Cluster (cosine)", fig_dir / "all_orders_tsne_by_cluster.png", annotations=all_annotations)
+    _plot_tsne(all_tsne, [str(c) for c in overall_clusters], f"All Orders t-SNE by Cluster (cosine)", fig_dir / f"{args.type}_all_orders_tsne_by_cluster.png", annotations=all_annotations)
 
     # 保存总体聚类结果
     overall_csv = fig_dir / 'overall_cluster_assignments.csv'
@@ -427,31 +498,31 @@ def main():
     print(f"总体 t-SNE 图已保存: {(fig_dir / 'all_orders_tsne_by_dataset.png').as_posix()} 和 {(fig_dir / 'all_orders_tsne_by_cluster.png').as_posix()}")
     print(f"总体聚类结果 CSV 已保存: {overall_csv.as_posix()}")
 
-    # 每个 order 单独聚类与可视化
-    # 为每个 order 单独聚类与可视化
-    orders = sorted(list(set([e['order'] for e in meta_entries])))
-    for order_name in orders:
-        idxs = [i for i, e in enumerate(meta_entries) if e['order'] == order_name]
-        if len(idxs) < 2:
-            continue
-        print(f"处理 {order_name} 的单独聚类与可视化...")
-        vectors = all_vectors[idxs]
-        datasets = [meta_entries[i]['dataset'] for i in idxs]
-        annotations = [meta_entries[i]['task_name'] for i in idxs]
-        n_clusters = len(set(datasets))
-        tsne_points = _tsne_2d(vectors, metric='cosine', random_state=42, perplexity=args.perplexity)
-        _plot_tsne(tsne_points, datasets, f"{order_name} t-SNE by Dataset (cosine)", fig_dir / f"{order_name}_tsne_by_dataset.png", annotations=annotations)
-        clusters = _spectral_cluster_cosine(vectors, n_clusters=n_clusters, random_state=42)
-        _plot_tsne(tsne_points, [str(c) for c in clusters], f"{order_name} t-SNE by Cluster (cosine)", fig_dir / f"{order_name}_tsne_by_cluster.png", annotations=annotations)
-        csv_path = fig_dir / f"{order_name}_cluster_assignments.csv"
-        with open(csv_path, 'w', encoding='utf-8') as f:
-            f.write('task_name,dataset,cluster,tsne_x,tsne_y\n')
-            for i_local, c in enumerate(clusters):
-                x, y = tsne_points[i_local]
-                meta_i = meta_entries[idxs[i_local]]
-                f.write(f"{meta_i['task_name']},{meta_i['dataset']},{int(c)},{x:.6f},{y:.6f}\n")
-        print(f"  {order_name} t-SNE 图已保存: {(fig_dir / f'{order_name}_tsne_by_dataset.png').as_posix()} 和 {(fig_dir / f'{order_name}_tsne_by_cluster.png').as_posix()}")
-        print(f"  {order_name} 聚类结果 CSV 已保存: {csv_path.as_posix()}")
+    # # 每个 order 单独聚类与可视化
+    # # 为每个 order 单独聚类与可视化
+    # orders = sorted(list(set([e['order'] for e in meta_entries])))
+    # for order_name in orders:
+    #     idxs = [i for i, e in enumerate(meta_entries) if e['order'] == order_name]
+    #     if len(idxs) < 2:
+    #         continue
+    #     print(f"处理 {order_name} 的单独聚类与可视化...")
+    #     vectors = all_vectors[idxs]
+    #     datasets = [meta_entries[i]['dataset'] for i in idxs]
+    #     annotations = [meta_entries[i]['task_name'] for i in idxs]
+    #     n_clusters = len(set(datasets))
+    #     tsne_points = _tsne_2d(vectors, metric='cosine', random_state=42, perplexity=args.perplexity)
+    #     _plot_tsne(tsne_points, datasets, f"{args.type}{order_name} t-SNE by Dataset (cosine)", fig_dir / f"{args.type}{order_name}_tsne_by_dataset.png", annotations=annotations)
+    #     clusters = _spectral_cluster_cosine(vectors, n_clusters=n_clusters, random_state=42)
+    #     _plot_tsne(tsne_points, [str(c) for c in clusters], f"{args.type}{order_name} t-SNE by Cluster (cosine)", fig_dir / f"{args.type}{order_name}_tsne_by_cluster.png", annotations=annotations)
+    #     csv_path = fig_dir / f"{args.type}{order_name}_cluster_assignments.csv"
+    #     with open(csv_path, 'w', encoding='utf-8') as f:
+    #         f.write('task_name,dataset,cluster,tsne_x,tsne_y\n')
+    #         for i_local, c in enumerate(clusters):
+    #             x, y = tsne_points[i_local]
+    #             meta_i = meta_entries[idxs[i_local]]
+    #             f.write(f"{meta_i['task_name']},{meta_i['dataset']},{int(c)},{x:.6f},{y:.6f}\n")
+    #     print(f"  {args.type}{order_name} t-SNE 图已保存: {(fig_dir / f'{args.type}{order_name}_tsne_by_dataset.png').as_posix()} 和 {(fig_dir / f'{args.type}{order_name}_tsne_by_cluster.png').as_posix()}")
+    #     print(f"  {order_name} 聚类结果 CSV 已保存: {csv_path.as_posix()}")
 
     # 保存结果到文件
     # with open(args.output, 'w', encoding='utf-8') as f:

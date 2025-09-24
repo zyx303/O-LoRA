@@ -236,7 +236,7 @@ def main():
     print(summary_df)
     
     # 保存汇总表
-    output_path = 'analyze/loss'
+    output_path = 'analyze/loss'+args.path.strip('/').replace('/','_')
     summary_df.to_csv(f"{output_path}.csv", index=False)
     print(f"\nLoss summary table saved to: {output_path}.csv")
     
