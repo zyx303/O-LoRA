@@ -603,6 +603,7 @@ class PeftModelForSequenceClassification(PeftModel):
                 prompt_idx=kwargs.pop("prompt_idx", None),
                 prompt_weight=kwargs.pop("prompt_weight", None),
                 prompt_momentum=kwargs.pop("prompt_momentum", 0),
+                dataset_names=kwargs.pop("Dataset", None),
             )
             batched_prompt = out["batched_prompt"][0]  # (B, top_k*length, C) with num_layers=1
 
@@ -920,6 +921,7 @@ class PeftModelForCausalLM(PeftModel):
                 prompt_idx=kwargs.pop("prompt_idx", None),
                 prompt_weight=kwargs.pop("prompt_weight", None),
                 prompt_momentum=kwargs.pop("prompt_momentum", 0),
+                dataset_names=kwargs.pop("Dataset", None),
             )
             batched_prompt = out["batched_prompt"][0]  # (B, P, C)
 
@@ -1279,6 +1281,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 prompt_idx=prompt_idx,
                 prompt_weight=prompt_weight,
                 prompt_momentum=prompt_momentum,
+                dataset_names=kwargs.pop("Dataset", None),
             )
 
             batched_prompt = out["batched_prompt"].to(inputs_embeds.dtype)

@@ -91,26 +91,52 @@ class EPrompt(nn.Module):
         x_inv_norm = torch.rsqrt(torch.maximum(square_sum, torch.tensor(epsilon, device=x.device)))
         return x * x_inv_norm
     
-    def forward(self, x_embed, prompt_mask=None, prompt_idx=None, prompt_weight=None, prompt_momentum=0):
-        assert prompt_mask is not None or prompt_idx is not None or prompt_weight is not None
+    def _get_prompt_indices_from_dataset_names(self, dataset_names):
+        """
+        Convert dataset names to prompt indices using hash.
+        
+        Args:
+            dataset_names: List of dataset names for the batch (e.g., ['dbpedia', 'dbpedia', 'ace2005'])
+            
+        Returns:
+            torch.Tensor: Prompt indices of shape [batch_size, top_k]
+        """
+        indices = []
+        for dataset_name in dataset_names:
+            # Use hash of dataset name to get a consistent index within pool_size
+            hash_val = hash(dataset_name) % self.pool_size
+            indices.append([hash_val] * self.top_k)
+        return torch.tensor(indices, device=next(self.parameters()).device)
+    
+    def forward(self, x_embed, prompt_mask=None, prompt_idx=None, prompt_weight=None, prompt_momentum=0, dataset_names=None):
+        # Priority: prompt_mask > dataset_names > prompt_idx > prompt_weight
+        if prompt_mask is not None:
+            idx = prompt_mask
+        elif dataset_names is not None:
+            # Convert dataset names to prompt indices using hash
+            idx = self._get_prompt_indices_from_dataset_names(dataset_names)
+        elif prompt_idx is not None:
+            idx = prompt_idx
+        elif prompt_weight is not None:
+            # Use prompt_weight for selection (fallback)
+            idx = None
+        else:
+            raise ValueError("At least one of prompt_mask, dataset_names, prompt_idx, or prompt_weight must be provided")
+            
         assert self.prompt_pool, "In HiDe-Prompt, 'prompt_pool' must be set to True"
         out = dict()
         if self.prompt_pool:
-            idx = prompt_idx
-
-            if self.batchwise_prompt and prompt_idx is not None:
-                prompt_id, id_counts = torch.unique(prompt_idx, return_counts=True, sorted=True)
+            if self.batchwise_prompt and idx is not None:
+                prompt_id, id_counts = torch.unique(idx, return_counts=True, sorted=True)
                 
                 if prompt_id.shape[0] < self.pool_size:
-                    prompt_id = torch.cat([prompt_id, torch.full((self.pool_size - prompt_id.shape[0],), torch.min(prompt_idx.flatten()), device=prompt_id.device)])
+                    prompt_id = torch.cat([prompt_id, torch.full((self.pool_size - prompt_id.shape[0],), torch.min(idx.flatten()), device=prompt_id.device)])
                     id_counts = torch.cat([id_counts, torch.full((self.pool_size - id_counts.shape[0],), 0, device=id_counts.device)])
                 _, major_idx = torch.topk(id_counts, k=self.top_k) # top_k
                 major_prompt_id = prompt_id[major_idx] # top_k
                 # expand to batch
                 idx = major_prompt_id.expand(x_embed.shape[0], -1).contiguous()  # B, top_k
             
-            if prompt_mask is not None:
-                idx = prompt_mask  # B, top_k
             if idx is not None:
                 out['prompt_idx'] = idx
             if self.use_prefix_tune_for_e_prompt:

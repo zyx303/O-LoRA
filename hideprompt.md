@@ -121,7 +121,7 @@
 
 > prompt_weight不使用
 
-![image-20250905203952371](./hidepromt.assets/image-20250905203952371.png)
+![image-20250905203952371](https://blogstastic-zyx.oss-cn-hangzhou.aliyuncs.com/images/image-20250905203952371.png)
 
 > 正在收集工作区信息下面按算法伪代码（图中第1–16行）逐步对应到仓库中的实现代码与符号。
 >
@@ -206,7 +206,7 @@
 
 
 
-> ![image-20250905205233619](./hidepromt.assets/image-20250905205233619.png)
+> ![image-20250905205233619](https://blogstastic-zyx.oss-cn-hangzhou.aliyuncs.com/images/image-20250905205233619.png)
 > 正在收集工作区信息下面把论文中4个损失和仓库里的实现一一对应，并标出用到的特征来源 pre_logits。
 >
 > - LCR(pt)（Eq. 9，类间/正交正则）
@@ -231,3 +231,17 @@
 >
 > 补充
 > - pre_logits 的来源：模型前向返回，键名为 `'pre_logits'`，由 `VisionTransformer.forward_head` 在分类头之前导出；其值在 WTP 的 `train_one_epoch` 中传入 `orth_loss`。
+
+
+
+
+
+![image-20250927164622261](https://blogstastic-zyx.oss-cn-hangzhou.aliyuncs.com/images/image-20250927164622261.png)
+
+uie_collator.seq2seq_call
+
+![image-20250927164841814](./hideprompt.assets/image-20250927164841814.png)
+
+![image-20250927164917880](./hideprompt.assets/image-20250927164917880.png)
+
+[B,len]
