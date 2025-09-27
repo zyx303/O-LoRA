@@ -48,41 +48,8 @@ class DataCollatorForUIE:
         else:
             raise ValueError('Unsupport model {}!'.format(model_name))
 
-        # 为HiDe-Prompt添加task_id信息
-        model_inputs = self._add_task_id_for_hideprompt(model_inputs, batch)
-
         return model_inputs
 
-    def _add_task_id_for_hideprompt(self, model_inputs, batch):
-        """为HiDe-Prompt添加task_id信息，基于当前训练的continual learning顺序"""
-        # 检查是否是HiDe-Prompt模型
-        from peft import PeftType
-        if (hasattr(self.model, 'peft_config') and 
-            self.model.peft_config and 
-            hasattr(list(self.model.peft_config.values())[0], 'peft_type') and
-            list(self.model.peft_config.values())[0].peft_type == PeftType.HIDE_PROMPT):
-            
-            # 获取当前任务的dataset信息用于日志
-            if batch and len(batch) > 0:
-                first_sample = batch[0]
-                task_type = first_sample.get('Task', '')
-                dataset_name = first_sample.get('Dataset', '')
-                
-                # 从模型配置中获取当前的task_id（由训练脚本设置）
-                from peft.utils.save_and_load import get_hide_prompt_task_id
-                try:
-                    current_task_id = get_hide_prompt_task_id(self.model)
-                    
-                    # HiDe-Prompt会自动根据current_task_id生成prompt_mask
-                    # 我们只需要确保task_id已经正确设置即可
-                    # 记录日志用于调试
-                    logger.info(f"HiDe-Prompt using task_id={current_task_id} for "
-                            f"task_type={task_type}, dataset={dataset_name}")
-                        
-                except Exception as e:
-                    logger.warning(f"Failed to get task_id for HiDe-Prompt: {e}")
-        
-        return model_inputs
 
     def get_instruction(self, instance):
         # "instructions \n options \n {0} \n Answer: "
@@ -153,6 +120,7 @@ class DataCollatorForUIE:
                 )
             label_mask = labels["attention_mask"].bool()
             model_inputs["labels"] = labels["input_ids"].masked_fill(~label_mask, self.label_pad_token_id)
+            model_inputs['Dataset'] = [instance['Dataset'] for instance in batch]
 
             # prepare decoder_input_ids
             if self.model is not None:
