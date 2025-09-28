@@ -42,6 +42,8 @@ class EPrompt(nn.Module):
         self.num_heads = num_heads
         self.same_key_value = same_key_value
 
+        self.dataset_map = dict()  # dataset name to prompt idx mapping
+
         if self.prompt_pool:
             # user prefix style
             if self.use_prefix_tune_for_e_prompt:
@@ -103,16 +105,20 @@ class EPrompt(nn.Module):
         """
         indices = []
         for dataset_name in dataset_names:
-            # Use hash of dataset name to get a consistent index within pool_size
-            hash_val = hash(dataset_name) % self.pool_size
-            indices.append([hash_val] * self.top_k)
-        return torch.tensor(indices, device=next(self.parameters()).device)
+            if dataset_name not in self.dataset_map:
+                prompt_idx = len(self.dataset_map) % self.pool_size
+                self.dataset_map[dataset_name] = prompt_idx
+            else:
+                prompt_idx = self.dataset_map[dataset_name]
+            indices.append(prompt_idx)
+        # Convert to [batch_size, top_k] shape by repeating each index top_k times
+        indices_tensor = torch.tensor(indices, device=next(self.parameters()).device)
+        return indices_tensor.unsqueeze(1).repeat(1, self.top_k)
     
     def forward(self, x_embed, prompt_mask=None, prompt_idx=None, prompt_weight=None, prompt_momentum=0, dataset_names=None):
         # Priority: prompt_mask > dataset_names > prompt_idx > prompt_weight
-        if prompt_mask is not None:
-            idx = prompt_mask
-        elif dataset_names is not None:
+        #直接使用dataset name
+        if dataset_names is not None:
             # Convert dataset names to prompt indices using hash
             idx = self._get_prompt_indices_from_dataset_names(dataset_names)
         elif prompt_idx is not None:

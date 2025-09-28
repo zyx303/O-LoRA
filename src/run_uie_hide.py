@@ -428,7 +428,7 @@ def main():
             task_type=TaskType.SEQ_2_SEQ_LM,
             inference_mode=False,
             prompt_key=False,
-            pool_size=100,  # 明确设置prompt pool大小
+            pool_size=10,  # 明确设置prompt pool大小
             top_k=1,       # 明确设置top_k
             use_prefix_tune_for_e_prompt=True,  # 确保使用prefix tuning
         )
