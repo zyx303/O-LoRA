@@ -6,7 +6,7 @@ export TRANSFORMERS_CACHE=/data/yongxi/.cache/huggingface
 
 port=$(shuf -i25000-30000 -n1)
 
-export debug=1
+# export debug=1
  
 #############!!!!! bash scripts/debug_hide_prompt.sh > debug.log 2>&1 &
 
@@ -51,12 +51,12 @@ CUDA_VISIBLE_DEVICES='' python src/run_uie_hide.py \
    --do_train \
    --do_predict \
    --predict_with_generate \
-   --model_name_or_path exp/olora/order_1/outputs/1-dbpedia/adapter \
+   --model_name_or_path logs_and_outputs/debug/order_1/outputs/1-dbpedia/adapter \
    --data_dir CL_Benchmark \
    --task_config_dir configs/order1_configs/amazon \
    --instruction_file configs/instruction_config.json \
    --instruction_strategy single \
-   --output_dir exp/debug/order_1/outputs/2-amazon \
+   --output_dir logs_and_outputs/debug/order_1/outputs/2-amazon \
    --per_device_train_batch_size 15 \
    --per_device_eval_batch_size 10 \
    --gradient_accumulation_steps 1 \

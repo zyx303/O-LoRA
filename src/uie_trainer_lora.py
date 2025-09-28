@@ -220,8 +220,8 @@ class UIETrainer(Seq2SeqTrainer):
         #         print(f"  Device: {param.device}")
         #         print(f"  Dtype: {param.dtype}")
         # 检查prompt梯度回传
-        if self.state.global_step % 50 == 0 or self.state.global_step < 10:
-            check_prompt_gradients(model, self.state.global_step, log_details=True)
+        # if self.state.global_step % 50 == 0 or self.state.global_step < 10:
+        #     check_prompt_gradients(model, self.state.global_step, log_details=True)
         return loss.detach()
 
 

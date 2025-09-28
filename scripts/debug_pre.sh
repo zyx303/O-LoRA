@@ -5,26 +5,27 @@ export CUDA_DEVICE_ORDER="PCI_BUS_ID"
 export TRANSFORMERS_CACHE=/data/yongxi/.cache/huggingface
 
 port=$(shuf -i25000-30000 -n1)
- 
-######!!! bash scripts/order_1_hide.sh> logs_and_outputs/hide/order_1/logs/train_and_infer.log 2>&1 &
 
-CUDA_VISIBLE_DEVICES='' python src/run_uie_hide.py \
+export debug=1
+ 
+#############!!!!! bash scripts/debug_hide_prompt.sh > debug.log 2>&1 &
+
+CUDA_VISIBLE_DEVICES='' python src/run_uie_lora.py \
    --do_train \
    --do_predict \
-   --num_virtual_tokens 100 \
    --predict_with_generate \
    --model_name_or_path initial_model/t5-large \
    --data_dir CL_Benchmark \
    --task_config_dir configs/order1_configs/dbpedia \
    --instruction_file configs/instruction_config.json \
    --instruction_strategy single \
-   --output_dir logs_and_outputs/hide/order_1/outputs/1-dbpedia \
-   --per_device_train_batch_size 16 \
-   --per_device_eval_batch_size 1 \
+   --output_dir logs_and_outputs/debug/order_1/outputs/1-dbpedia \
+   --per_device_train_batch_size 15 \
+   --per_device_eval_batch_size 10 \
    --gradient_accumulation_steps 1 \
-   --learning_rate 5e-4 \
+   --learning_rate 1e-03 \
    --num_train_epochs 1 \
-   --run_name order1_round1 \
+   --run_name order1_round1_hide_prompt \
    --max_source_length 512 \
    --max_target_length 50 \
    --generation_max_length 50 \
@@ -39,30 +40,28 @@ CUDA_VISIBLE_DEVICES='' python src/run_uie_hide.py \
    --evaluation_strategy no \
    --save_strategy no \
    --save_steps 1500 \
-   --lamda_1 0.5 \
-   --lamda_2 0 \
-   --peft_type hide_prompt
+   --lamda_1 1 \
+   --lamda_2 0 
+   # --max_train_samples 15 --max_eval_samples 10 --max_predict_samples 10
 
-# sleep 5
+sleep 3
 
-# CUDA_VISIBLE_DEVICES=7 deepspeed --master_port $port src/run_uie_hide.py \
+# CUDA_VISIBLE_DEVICES='' python src/run_uie_hide.py \
 #    --do_train \
 #    --do_predict \
-#    --num_virtual_tokens 100 \
 #    --predict_with_generate \
-#    --model_name_or_path logs_and_outputs/hide/order_1/outputs/1-dbpedia/adapter \
+#    --model_name_or_path exp/olora/order_1/outputs/1-dbpedia/adapter \
 #    --data_dir CL_Benchmark \
 #    --task_config_dir configs/order1_configs/amazon \
 #    --instruction_file configs/instruction_config.json \
 #    --instruction_strategy single \
-#    --output_dir logs_and_outputs/hide/order_1/outputs/2-amazon \
-#    --per_device_train_batch_size 16 \
-#    --per_device_eval_batch_size 1 \
+#    --output_dir exp/debug/order_1/outputs/2-amazon \
+#    --per_device_train_batch_size 15 \
+#    --per_device_eval_batch_size 10 \
 #    --gradient_accumulation_steps 1 \
-#    --learning_rate 5e-4 \
+#    --learning_rate 1e-03 \
 #    --num_train_epochs 1 \
-#    --deepspeed configs/ds_configs/stage2.config \
-#    --run_name order1_round2 \
+#    --run_name order1_round2_hide_prompt \
 #    --max_source_length 512 \
 #    --max_target_length 50 \
 #    --generation_max_length 50 \
@@ -79,29 +78,28 @@ CUDA_VISIBLE_DEVICES='' python src/run_uie_hide.py \
 #    --save_steps 1500 \
 #    --lamda_1 0.5 \
 #    --lamda_2 0 \
-#    --peft_type hide_prompt
-
+#    --peft_type hide_prompt \
+#    --max_train_samples 15 --max_eval_samples 10 --max_predict_samples 10
 
 # sleep 5
 
 # CUDA_VISIBLE_DEVICES=7 deepspeed --master_port $port src/run_uie_hide.py \
 #    --do_train \
 #    --do_predict \
-#    --num_virtual_tokens 100 \
 #    --predict_with_generate \
-#    --model_name_or_path logs_and_outputs/hide/order_1/outputs/2-amazon/adapter \
+#    --model_name_or_path logs_and_outputs/debug/order_1/outputs/2-amazon/adapter \
 #    --data_dir CL_Benchmark \
 #    --task_config_dir configs/order1_configs/yahoo \
 #    --instruction_file configs/instruction_config.json \
 #    --instruction_strategy single \
-#    --output_dir logs_and_outputs/hide/order_1/outputs/3-yahoo \
-#    --per_device_train_batch_size 16 \
+#    --output_dir logs_and_outputs/debug/order_1/outputs/3-yahoo \
+#    --per_device_train_batch_size 1 \
 #    --per_device_eval_batch_size 1 \
 #    --gradient_accumulation_steps 1 \
-#    --learning_rate 5e-4 \
+#    --learning_rate 1e-03 \
 #    --num_train_epochs 1 \
 #    --deepspeed configs/ds_configs/stage2.config \
-#    --run_name order1_round3 \
+#    --run_name order1_round3_hide_prompt \
 #    --max_source_length 512 \
 #    --max_target_length 50 \
 #    --generation_max_length 50 \
@@ -118,7 +116,8 @@ CUDA_VISIBLE_DEVICES='' python src/run_uie_hide.py \
 #    --save_steps 1500 \
 #    --lamda_1 0.5 \
 #    --lamda_2 0 \
-#    --peft_type hide_prompt
+#    --peft_type hide_prompt \
+#    --max_train_samples 15 --max_eval_samples 10 --max_predict_samples 10
 
 
 # sleep 5
@@ -126,21 +125,20 @@ CUDA_VISIBLE_DEVICES='' python src/run_uie_hide.py \
 # CUDA_VISIBLE_DEVICES=7 deepspeed --master_port $port src/run_uie_hide.py \
 #    --do_train \
 #    --do_predict \
-#    --num_virtual_tokens 100 \
 #    --predict_with_generate \
-#    --model_name_or_path logs_and_outputs/hide/order_1/outputs/3-yahoo/adapter \
+#    --model_name_or_path logs_and_outputs/debug/order_1/outputs/3-yahoo/adapter \
 #    --data_dir CL_Benchmark \
 #    --task_config_dir configs/order1_configs/agnews \
 #    --instruction_file configs/instruction_config.json \
 #    --instruction_strategy single \
-#    --output_dir logs_and_outputs/hide/order_1/outputs/4-agnews \
-#    --per_device_train_batch_size 16 \
+#    --output_dir logs_and_outputs/debug/order_1/outputs/4-agnews \
+#    --per_device_train_batch_size 1 \
 #    --per_device_eval_batch_size 1 \
 #    --gradient_accumulation_steps 1 \
-#    --learning_rate 5e-4 \
+#    --learning_rate 1e-03 \
 #    --num_train_epochs 1 \
 #    --deepspeed configs/ds_configs/stage2.config \
-#    --run_name order1_round4 \
+#    --run_name order1_round4_hide_prompt \
 #    --max_source_length 512 \
 #    --max_target_length 50 \
 #    --generation_max_length 50 \
@@ -157,5 +155,6 @@ CUDA_VISIBLE_DEVICES='' python src/run_uie_hide.py \
 #    --save_steps 1500 \
 #    --lamda_1 0.5 \
 #    --lamda_2 0 \
-#    --peft_type hide_prompt
+#    --peft_type hide_prompt \
+#    --max_train_samples 15 --max_eval_samples 10 --max_predict_samples 10
 
