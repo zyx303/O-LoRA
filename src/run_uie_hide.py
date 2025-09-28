@@ -357,7 +357,19 @@ def main():
     # Distributed training:
     # The .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
-    if 'llama' in model_args.model_name_or_path.lower():
+    if 'adapter' in model_args.model_name_or_path: # load lora-config
+        config = PeftConfig.from_pretrained(model_args.model_name_or_path)
+        if 'llama' in model_args.model_name_or_path.lower():
+            tokenizer = transformers.LlamaTokenizer.from_pretrained(config.base_model_name_or_path)
+            config.bos_token_id = 1
+            config.eos_token_id = 2
+            config.pad_token_id = 1
+            tokenizer.bos_token_id = 1
+            tokenizer.eos_token_id = 2
+            tokenizer.pad_token_id = 1
+        else:
+            tokenizer = AutoTokenizer.from_pretrained(config.base_model_name_or_path)
+    elif 'llama' in model_args.model_name_or_path.lower():
         config = AutoConfig.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=model_args.cache_dir,
@@ -397,8 +409,11 @@ def main():
         tokenizer.padding_side = 'left'
     else: 
         model_class = AutoModelForSeq2SeqLM
-
-    if 'llama' in model_args.model_name_or_path.lower():
+        
+    if 'adapter' in model_args.model_name_or_path: # add lora-adapter to the original model
+        model = model_class.from_pretrained(config.base_model_name_or_path)
+        model = PeftModel.from_pretrained(model, model_args.model_name_or_path)
+    elif 'llama' in model_args.model_name_or_path.lower():
         model = model_class.from_pretrained(
             model_args.model_name_or_path,
             from_tf=bool(".ckpt" in model_args.model_name_or_path),
