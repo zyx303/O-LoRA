@@ -1136,6 +1136,10 @@ class PeftModelForSeq2SeqLM(PeftModel):
     ):
         peft_config = self.active_peft_config
         if not isinstance(peft_config, PromptLearningConfig):
+            # Remove Dataset argument from kwargs as it's not supported by base T5 model
+            # Only remove Dataset for non-prompt learning configs (like LoRA, AdaLoRA, etc.)
+            base_model_kwargs = kwargs.copy()
+            base_model_kwargs.pop("Dataset", None)
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -1147,7 +1151,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 output_attentions=output_attentions,
                 output_hidden_states=output_hidden_states,
                 return_dict=return_dict,
-                **kwargs,
+                **base_model_kwargs,
             )
 
         batch_size = input_ids.shape[0]
