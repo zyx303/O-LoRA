@@ -220,24 +220,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             # Initialize dynamic prompt pool for L2P
             prompt_encoder = L2PPromptPool(config)
         elif config.peft_type == PeftType.HIDE_PROMPT:
-            # Standalone HiDe-Prompt using provided EPrompt implementation (prompt style, non-prefix)
-            # HiDe-Prompt defaults: prompt_key=False, shared_prompt_key=False
-            prompt_encoder = HiDeEPrompt(
-                length=config.num_virtual_tokens,
-                embed_dim=config.token_dim,
-                embedding_key="mean",
-                prompt_init=getattr(config, "prompt_init", "uniform"),
-                prompt_pool=True,
-                prompt_key=getattr(config, "prompt_key", False),  # HiDe default: False
-                pool_size=getattr(config, "pool_size", 10),
-                top_k=getattr(config, "top_k", 5),
-                batchwise_prompt=getattr(config, "batchwise_prompt", False),
-                prompt_key_init=getattr(config, "prompt_key_init", "uniform"),
-                num_layers=config.num_layers,
-                use_prefix_tune_for_e_prompt=True,  # HiDe uses standard prompt tuning
-                num_heads=config.num_attention_heads,
-                same_key_value=False,
-            )
+            prompt_encoder = HiDeEPrompt(config)
         else:
             raise ValueError("Not supported")
         self.prompt_encoder.update(torch.nn.ModuleDict({adapter_name: prompt_encoder}))
@@ -288,7 +271,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING.get(self.config.model_type, None) is not None:
                 post_process_fn = TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING[self.config.model_type]
                 past_key_values = post_process_fn(past_key_values)
-            return past_key_values
+            return past_key_values #tuple len:24, torch.Size([4, 15, 16, 20, 64])
         elif peft_config.peft_type == PeftType.L2P:
             # For L2P, we return the prompt pool itself since selection happens in forward
             # This is used for simple prompts when no dynamic selection is needed
@@ -913,7 +896,6 @@ class PeftModelForCausalLM(PeftModel):
             # HiDe-Prompt: use provided indices/masks/weights to build prompts
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
-
             eprompt: HiDeEPrompt = self.prompt_encoder[self.active_adapter]
             out = eprompt(
                 x_embed=inputs_embeds,
@@ -1178,7 +1160,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
         )
 
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
-            past_key_values = self.get_prompt(batch_size)
+            past_key_values = self.get_prompt(batch_size) #tuple len:24, torch.Size([4, 15, 16, 20, 64])
             return self.base_model(
                 input_ids=input_ids, decoder_input_ids=decoder_input_ids, past_key_values=past_key_values, **kwargs
             )
@@ -1234,8 +1216,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
             outputs['reduce_sim'] = prompt_results['reduce_sim']
             return outputs
         elif peft_config.peft_type == PeftType.HIDE_PROMPT:
-            # HiDe-Prompt with prefix-tuning style: build KV prefixes for specified attention blocks
-            # Default to compute embeddings if ids are provided
+            # 简化的HiDe-Prompt实现，复用prefix_tuning逻辑
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
             if decoder_inputs_embeds is None and decoder_input_ids is None:
@@ -1245,110 +1226,55 @@ class PeftModelForSeq2SeqLM(PeftModel):
             if decoder_inputs_embeds is None:
                 decoder_inputs_embeds = self.word_embeddings(decoder_input_ids)
 
+            # 获取HiDe-Prompt选择的prompt
             eprompt: HiDeEPrompt = self.prompt_encoder[self.active_adapter]
-            # Auto-build prompt_mask by task_id when requested (vision-style HiDe logic)
-            use_prompt_mask = kwargs.pop("use_prompt_mask", None)
-            task_id = kwargs.pop("task_id", None)
-            # Backfill defaults: enable mask by default and derive task_id from config/model if missing
-            if task_id is None:
-                task_id = getattr(self.active_peft_config, "current_task_id", getattr(self, "_current_task_id", 0))
-            if use_prompt_mask is None:
-                use_prompt_mask = True if task_id is not None else False
+            
+            # 简化参数处理
+            task_id = kwargs.pop("task_id", 0)
+            dataset_names = kwargs.pop("Dataset", None)
             prompt_idx = kwargs.pop("prompt_idx", None)
-            prompt_weight = kwargs.pop("prompt_weight", None)
-            prompt_momentum = kwargs.pop("prompt_momentum", 0)
-            prompt_mask = kwargs.pop("prompt_mask", None)
-            # Optional: choose which transformer layers to apply KV prefixes on
-            # - pass a list/tuple in kwargs["prefix_layers"], default: all layers
-            prefix_layers = kwargs.pop("prefix_layers", None)
-            # Optional: choose which attention block pair to target inside a layer (pair index)
-            # Example for seq2seq (num_transformer_submodules==2):
-            #   kv_target=0 => encoder self-attn (pack[0:2])
-            #   kv_target=1 => decoder self-attn (pack[2:4])
-            kv_target = int(kwargs.pop("kv_target", 1))
-
-            if use_prompt_mask and task_id is not None and prompt_mask is None:
-                start = task_id * eprompt.top_k
-                end = (task_id + 1) * eprompt.top_k
-                if end <= eprompt.pool_size:
-                    single = torch.arange(start, end, device=inputs_embeds.device)
-                    prompt_mask = single.unsqueeze(0).expand(inputs_embeds.size(0), -1).contiguous()
-                else:
-                    prompt_mask = None
-                if task_id == 0:
-                    prompt_momentum = 0
-            # out: dict with keys: batched_prompt, prompt_idx
-            # prompt_idx: (B, k) indices in pool  (20,1)
+            
+            # 选择prompt
             out = eprompt(
                 x_embed=inputs_embeds,
-                prompt_mask=prompt_mask,
                 prompt_idx=prompt_idx,
-                prompt_weight=prompt_weight,
-                prompt_momentum=prompt_momentum,
-                dataset_names=kwargs.pop("Dataset", None),
+                dataset_names=dataset_names,
             )
+            
+            # 获取选择的prompt，直接作为past_key_values使用
+            batched_prompt = out["batched_prompt"]  # (num_layers, B, 2, P, H, D)
+            # torch.Size([24, 15, 2, 20, 16, 64])
+            
+            # 完全复用PREFIX_TUNING的处理逻辑
+            # 首先重塑batched_prompt为prefix_tuning的格式
+            num_layers, batch_size, dual, prompt_length, num_heads, head_dim = batched_prompt.shape
+            
+            # 重塑为 (batch_size, prompt_length, num_layers * 2, num_heads, head_dim)
+            # 类似prefix_tuning中的view操作
+            past_key_values = batched_prompt.permute(1, 3, 0, 2, 4, 5).contiguous()  # (B, P, num_layers, 2, H, D)
+            past_key_values = past_key_values.view(
+                batch_size,
+                prompt_length,
+                num_layers * 2,
+                num_heads,
+                head_dim
+            )
+            
+            # 如果是seq2seq (num_transformer_submodules == 2)，复制KV对
+            if peft_config.num_transformer_submodules == 2:
+                past_key_values = torch.cat([past_key_values, past_key_values], dim=2)
+            
+            # 应用与prefix_tuning相同的permute和split
+            past_key_values = past_key_values.permute([2, 0, 3, 1, 4]).split(
+                peft_config.num_transformer_submodules * 2
+            )
+            
+            # 应用后处理函数（如果存在）
+            if TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING.get(self.config.model_type, None) is not None:
+                post_process_fn = TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING[self.config.model_type]
+                past_key_values = post_process_fn(past_key_values)
 
-            batched_prompt = out["batched_prompt"].to(inputs_embeds.dtype)
-            # Assemble past_key_values in the same general structure as prefix_tuning
-            # Target: per-layer pack shaped (S, B, H, P, D), where S = num_transformer_submodules * 2
-            # Here we place KV into the first submodule slot (S>=2): [K0, V0, ...], others zeroed.
-            num_layers = batched_prompt.shape[0]
-            B = batched_prompt.shape[1]
-            dual = batched_prompt.shape[2]  # 2 => K/V
-            P = batched_prompt.shape[3]
-            H = batched_prompt.shape[4]
-            D = batched_prompt.shape[5]
-
-            # Validate expected K/V dimension
-            assert dual == 2, "HiDe EPrompt should output dual=2 dimension for K/V"
-
-            device = inputs_embeds.device
-            # Choose a target dtype that matches the hidden_states of the target attention block
-            # Priority:
-            # 1) If targeting decoder (kv_target>0) and we have decoder_inputs_embeds, use its dtype
-            # 2) Otherwise try the base_model first parameter's dtype (covers deepspeed/mixed precision)
-            # 3) Fallback to inputs_embeds.dtype
-            try:
-                base_param_dtype = next(self.base_model.parameters()).dtype
-            except Exception:
-                base_param_dtype = None
-            if base_param_dtype is not None:
-                dtype = base_param_dtype
-            elif kv_target > 0 and decoder_inputs_embeds is not None:
-                dtype = decoder_inputs_embeds.dtype
-            else:
-                dtype = inputs_embeds.dtype
-
-            # Decide submodule span (encoder+decoder vs single). For seq2seq we use 2 submodules by default.
-            num_submodules = getattr(self.active_peft_config, "num_transformer_submodules", 2)
-            S = num_submodules * 2
-
-            # Build per-layer pack
-            layer_packs = []
-            # Normalize prefix_layers into a set of indices
-            if prefix_layers is None:
-                active_layers = set(range(num_layers))
-            else:
-                active_layers = set(int(i) for i in prefix_layers if 0 <= int(i) < num_layers)
-
-            for li in range(num_layers):
-                # zeros for all slots by default
-                pack = torch.zeros((S, B, H, P, D), device=device, dtype=dtype)
-                if li in active_layers:
-                    # Fill the selected submodule's KV slots (pair at [kv_pair_start, kv_pair_start+1]).
-                    k = batched_prompt[li, :, 0]  # (B, P, H, D)
-                    v = batched_prompt[li, :, 1]  # (B, P, H, D)
-                    # reorder to (B, H, P, D)
-                    k = k.permute(0, 2, 1, 3).contiguous().to(dtype)
-                    v = v.permute(0, 2, 1, 3).contiguous().to(dtype)
-                    kv_pair_start = max(0, min(kv_target, num_submodules - 1)) * 2
-                    pack[kv_pair_start] = k
-                    pack[kv_pair_start + 1] = v
-                layer_packs.append(pack)
-
-            past_key_values = tuple(layer_packs)
-
-            # Unlike token-prepend, KV prefix doesn't need to expand attention_mask
+            # 直接调用base_model，复用prefix_tuning的处理逻辑
             return self.base_model(
                 inputs_embeds=inputs_embeds,
                 decoder_inputs_embeds=decoder_inputs_embeds,
@@ -1516,12 +1442,15 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 if task_id == 0:
                     prompt_momentum = 0
             # 生成 batched_prompt: (num_layers, B, 2, P, H, D)
+            # 检查是否有Dataset信息用于prompt选择
+            dataset_names = getattr(self, '_current_datasets', None)
             out = eprompt(
                 x_embed=inputs_embeds,
                 prompt_mask=prompt_mask,
                 prompt_idx=prompt_idx,
                 prompt_weight=prompt_weight,
                 prompt_momentum=prompt_momentum,
+                dataset_names=dataset_names,
             )
             batched_prompt = out["batched_prompt"].to(inputs_embeds.dtype)
 

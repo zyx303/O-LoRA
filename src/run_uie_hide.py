@@ -70,15 +70,15 @@ os.environ['WANDB_DISABLED'] = "True"
 logger = logging.getLogger(__name__)
 CURRENT_DIR = os.path.dirname(__file__)
 
-try:
-    nltk.data.find("tokenizers/punkt")
-except (LookupError, OSError):
-    if is_offline_mode():
-        raise LookupError(
-            "Offline mode: run this script without TRANSFORMERS_OFFLINE first to download nltk data files"
-        )
-    with FileLock(".lock") as lock:
-        nltk.download("punkt", quiet=True)
+# try:
+#     nltk.data.find("tokenizers/punkt")
+# except (LookupError, OSError):
+#     if is_offline_mode():
+#         raise LookupError(
+#             "Offline mode: run this script without TRANSFORMERS_OFFLINE first to download nltk data files"
+#         )
+#     with FileLock(".lock") as lock:
+#         nltk.download("punkt", quiet=True)
 
 
 @dataclass
@@ -429,8 +429,7 @@ def main():
             inference_mode=False,
             prompt_key=False,
             pool_size=10,  # 明确设置prompt pool大小
-            top_k=1,       # 明确设置top_k
-            use_prefix_tune_for_e_prompt=True,  # 确保使用prefix tuning
+            top_k=1
         )
         model = get_peft_model(model, peft_config)
     else:

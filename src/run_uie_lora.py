@@ -46,7 +46,7 @@ from transformers import (
     set_seed, )
 from transformers.file_utils import is_offline_mode
 from transformers.trainer_utils import get_last_checkpoint
-from peft import get_peft_config, get_peft_model, LoraConfig, TaskType, PeftModel, PeftConfig  # add
+from peft import get_peft_config, get_peft_model, LoraConfig, TaskType, PeftModel, PeftConfig,PrefixTuningConfig  # add
 from peft import SDLoraConfig  # new
 from peft import L2PConfig  # new
 from peft import PeftType  # new
@@ -70,15 +70,15 @@ os.environ['WANDB_DISABLED'] = "True"
 logger = logging.getLogger(__name__)
 CURRENT_DIR = os.path.dirname(__file__)
 
-try:
-    nltk.data.find("tokenizers/punkt")
-except (LookupError, OSError):
-    if is_offline_mode():
-        raise LookupError(
-            "Offline mode: run this script without TRANSFORMERS_OFFLINE first to download nltk data files"
-        )
-    with FileLock(".lock") as lock:
-        nltk.download("punkt", quiet=True)
+# try:
+#     nltk.data.find("tokenizers/punkt")
+# except (LookupError, OSError):
+#     if is_offline_mode():
+#         raise LookupError(
+#             "Offline mode: run this script without TRANSFORMERS_OFFLINE first to download nltk data files"
+#         )
+#     with FileLock(".lock") as lock:
+#         nltk.download("punkt", quiet=True)
 
 
 @dataclass
@@ -478,8 +478,7 @@ def main():
                 inference_mode=False,
                 prompt_key=False,
                 pool_size=100,  # 明确设置prompt pool大小
-                top_k=1,       # 明确设置top_k
-                use_prefix_tune_for_e_prompt=True,  # 确保使用prefix tuning
+                top_k=1       # 明确设置top_k
             )
         elif model_args.peft_type.upper() == "INFLORA":
             peft_config = InfLoRAConfig(
@@ -490,8 +489,13 @@ def main():
                 lora_dropout=0.1
             )
         else:
-            peft_config = LoraConfig(
-                task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=model_args.lora_dim, lora_alpha=32, lora_dropout=0.1
+            # peft_config = LoraConfig(
+            #     task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=model_args.lora_dim, lora_alpha=32, lora_dropout=0.1
+            # )
+            peft_config = PrefixTuningConfig(
+                peft_type="PREFIX_TUNING",
+                task_type="SEQ_2_SEQ_LM",
+                num_virtual_tokens=20
             )
         model = get_peft_model(model, peft_config)
         with open(os.path.join(training_args.output_dir, "config.json"), "w") as f:

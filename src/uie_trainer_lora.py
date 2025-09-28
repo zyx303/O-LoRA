@@ -7,8 +7,36 @@ from transformers.trainer_callback import TrainerCallback
 from uie_collator import SUPPORTED_DECODER_MODELS, check_model
 from uie_dataset_lora import ANSWER_PREFIX
 from peft.tuners.inflora import LoraLayer as InfLoraLayer
-
+import sys
 from peft import PeftType
+
+
+def check_prompt_gradients(model, step=0, log_details=False):
+    """检查prompt梯度回传是否正常"""
+    prompt_params = {}
+    for name, param in model.named_parameters():
+        # print(name)
+        if param.requires_grad:
+            print(f'{name} requires grad')
+            # if any(kw in name.lower() for kw in ['prompt', 'hide_prompt', 'e_prompt']):
+            if param.grad is not None:
+                grad_norm = param.grad.norm().item()
+                prompt_params[name] = grad_norm
+                if log_details:
+                    print(f"Step {step} - {name}: grad_norm={grad_norm:.6f}")
+            else:
+                prompt_params[name] = 0.0
+                if log_details:
+                    print(f"Step {step} - {name}: No gradient!")
+    
+    if prompt_params:
+        total_norm = sum(prompt_params.values())
+        if log_details:
+            print(f"Step {step} - Total prompt grad norm: {total_norm:.6f}")
+        sys.stdout.flush()
+        return total_norm > 1e-8  # 梯度是否正常
+    # 刷新std
+    return True
 
 
 def skip_instructions(model, predictions_ids, tokenizer, ignore_idx=-100):
@@ -123,6 +151,8 @@ class UIETrainer(Seq2SeqTrainer):
         
         
         with self.compute_loss_context_manager():
+            if 'Dataset' in inputs and getattr(model, "peft_type", "").upper() != "HIDE_PROMPT":
+                inputs.pop("Dataset")
             loss,outputs = self.compute_loss(model, inputs,return_outputs=True)
 
         if self.args.n_gpu > 1:
@@ -160,7 +190,7 @@ class UIETrainer(Seq2SeqTrainer):
             lamda_2 = self.args.lamda_2
 
             # print(f"orthogonal_loss: {orthogonal_loss.item()}; l2_loss: {l2_loss.item()}; accuracy_loss: {loss.item()}; λ1: {lamda_1}; λ2: {lamda_2}")
-            logger.info(f"orthogonal_loss: {orthogonal_loss.item()}; l2_loss: {l2_loss.item()}; accuracy_loss: {loss.item()}; λ1: {lamda_1}; λ2: {lamda_2}")
+            # logger.info(f"orthogonal_loss: {orthogonal_loss.item()}; l2_loss: {l2_loss.item()}; accuracy_loss: {loss.item()}; λ1: {lamda_1}; λ2: {lamda_2}")
             loss = loss + orthogonal_loss * lamda_1 + l2_loss * lamda_2
         ######################################################################
 
@@ -189,7 +219,9 @@ class UIETrainer(Seq2SeqTrainer):
         #         print(f"  Requires grad: {param.requires_grad}")
         #         print(f"  Device: {param.device}")
         #         print(f"  Dtype: {param.dtype}")
-
+        # 检查prompt梯度回传
+        if self.state.global_step % 50 == 0 or self.state.global_step < 10:
+            check_prompt_gradients(model, self.state.global_step, log_details=True)
         return loss.detach()
 
 
@@ -417,8 +449,11 @@ class UIETrainer(Seq2SeqTrainer):
         else:
             generation_inputs = inputs[self.model.main_input_name]
 
-        # 为HiDe-Prompt在生成时添加task_id信息  
-        # 注意：不能直接传递prompt_idx给generate，需要通过forward过程处理
+        # 为HiDe-Prompt在生成时添加dataset信息用于prompt选择
+        # 通过临时设置模型属性来传递Dataset信息
+        if "Dataset" in inputs:
+            self.model._current_datasets = inputs["Dataset"]
+            
         generated_tokens = self.model.generate(
             input_ids=generation_inputs, 
             generation_config=generation_config

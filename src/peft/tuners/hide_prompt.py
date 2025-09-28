@@ -24,9 +24,25 @@ class HidePromptConfig(PromptLearningConfig):
     def __post_init__(self):
         self.peft_type = PeftType.HIDE_PROMPT
 class EPrompt(nn.Module):
-    def __init__(self, length=5, embed_dim=None, embedding_key='mean', prompt_init='uniform', prompt_pool=True, 
+    def __init__(self, config=None, length=5, embed_dim=None, embedding_key='mean', prompt_init='uniform', prompt_pool=True, 
                  prompt_key=False, pool_size=10, top_k=5, batchwise_prompt=False, prompt_key_init='uniform',
                  num_layers=1, use_prefix_tune_for_e_prompt=False, num_heads=-1, same_key_value=False,):
+        # 如果传入config，从config中提取参数
+        if config is not None:
+            length = config.num_virtual_tokens
+            embed_dim = config.token_dim
+            embedding_key = getattr(config, "embedding_key", "mean")
+            prompt_init = getattr(config, "prompt_init", "uniform")
+            prompt_pool = True
+            prompt_key = getattr(config, "prompt_key", False)
+            pool_size = getattr(config, "pool_size", 10)
+            top_k = getattr(config, "top_k", 5)
+            batchwise_prompt = getattr(config, "batchwise_prompt", False)
+            prompt_key_init = getattr(config, "prompt_key_init", "uniform")
+            num_layers = config.num_layers
+            use_prefix_tune_for_e_prompt = True
+            num_heads = config.num_attention_heads
+            same_key_value = False
         super().__init__()
 
         self.length = length
