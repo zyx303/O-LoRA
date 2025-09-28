@@ -1,4 +1,5 @@
 import torch
+import os
 from transformers import GenerationConfig
 from transformers.trainer_seq2seq import Seq2SeqTrainer
 from transformers.trainer import *
@@ -458,6 +459,16 @@ class UIETrainer(Seq2SeqTrainer):
             input_ids=generation_inputs, 
             generation_config=generation_config
         )
+        
+        # 打印生成的token ID和对应的文本（通过环境变量控制）
+        print("=== 生成结果 ===")
+        for i, tokens in enumerate(generated_tokens):
+            decoded_text = self.tokenizer.decode(tokens, skip_special_tokens=True)
+            print(f"样本 {i}: {decoded_text}")
+            # 也打印token IDs
+            print(f"Token IDs: {tokens.tolist()}")
+        print("===============")
+        sys.stdout.flush()
 
         bs, source_len = inputs['input_ids'].shape
         # in case the batch is shorter than max length, the output should be padded

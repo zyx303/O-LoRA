@@ -1457,39 +1457,35 @@ class PeftModelForSeq2SeqLM(PeftModel):
             # 决定是否以 KV 前缀形式注入，还是保留 encoder 端 token 拼接（当目标为 encoder 时）
             num_submodules = getattr(self.active_peft_config, "num_transformer_submodules", 2)
             if kv_target > 0 and model_kwargs.get("past_key_values", None) is None:
-                # 构造与 prefix-tuning 对齐的 past_key_values，并注入到目标子模块（如 decoder）
-                num_layers = batched_prompt.shape[0]
-                B = batched_prompt.shape[1]
-                dual = batched_prompt.shape[2]
-                P = batched_prompt.shape[3]
-                H = batched_prompt.shape[4]
-                D = batched_prompt.shape[5]
+                # 构造与 forward 方法对齐的 past_key_values 格式
+                num_layers, batch_size, dual, prompt_length, num_heads, head_dim = batched_prompt.shape
                 assert dual == 2, "HiDe EPrompt should output K/V dual prompts"
-
-                S = num_submodules * 2
-                device = inputs_embeds.device
-                # Choose dtype robustly for generation as well
-                try:
-                    base_param_dtype = next(self.base_model.parameters()).dtype
-                except Exception:
-                    base_param_dtype = None
-                dtype = base_param_dtype or inputs_embeds.dtype
-                if prefix_layers is None:
-                    active_layers = set(range(num_layers))
-                else:
-                    active_layers = set(int(i) for i in prefix_layers if 0 <= int(i) < num_layers)
-
-                layer_packs = []
-                kv_pair_start = max(0, min(kv_target, num_submodules - 1)) * 2
-                for li in range(num_layers):
-                    pack = torch.zeros((S, B, H, P, D), device=device, dtype=dtype)
-                    if li in active_layers:
-                        k = batched_prompt[li, :, 0].permute(0, 2, 1, 3).contiguous().to(dtype)  # (B,H,P,D)
-                        v = batched_prompt[li, :, 1].permute(0, 2, 1, 3).contiguous().to(dtype)  # (B,H,P,D)
-                        pack[kv_pair_start] = k
-                        pack[kv_pair_start + 1] = v
-                    layer_packs.append(pack)
-                model_kwargs["past_key_values"] = tuple(layer_packs)
+                
+                # 应用与 forward 方法相同的重塑逻辑
+                past_key_values = batched_prompt.permute(1, 3, 0, 2, 4, 5).contiguous()  # (B, P, num_layers, 2, H, D)
+                past_key_values = past_key_values.view(
+                    batch_size,
+                    prompt_length,
+                    num_layers * 2,
+                    num_heads,
+                    head_dim
+                )
+                
+                # 如果是seq2seq (num_transformer_submodules == 2)，复制KV对
+                if num_submodules == 2:
+                    past_key_values = torch.cat([past_key_values, past_key_values], dim=2)
+                
+                # 应用与 forward 方法相同的permute和split
+                past_key_values = past_key_values.permute([2, 0, 3, 1, 4]).split(
+                    num_submodules * 2
+                )
+                
+                # 应用后处理函数（如果存在）
+                if TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING.get(self.config.model_type, None) is not None:
+                    post_process_fn = TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING[self.config.model_type]
+                    past_key_values = post_process_fn(past_key_values)
+                
+                model_kwargs["past_key_values"] = past_key_values
                 # 不修改 encoder_outputs / attention_mask（保持与 prefix_tuning 生成阶段一致）
                 return model_kwargs
             else:

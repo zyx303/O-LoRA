@@ -301,6 +301,12 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
             current_task_id = getattr(config, "current_task_id", getattr(model, "_current_task_id", None))
             if current_task_id is not None:
                 hide_meta["task_id"] = int(current_task_id)
+            
+            # 保存 dataset_map 用于持久化
+            if hasattr(eprompt, "dataset_map") and eprompt.dataset_map:
+                hide_meta["dataset_map"] = dict(eprompt.dataset_map)  # 转换为普通字典以确保可序列化
+                print(f"HiDe-Prompt: 保存 dataset_map，包含 {len(eprompt.dataset_map)} 个数据集映射")
+            
             to_return["hide_prompt_meta"] = hide_meta
         else:
             # 其他 PromptLearningConfig 维持原逻辑
@@ -590,7 +596,13 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                 meta = state_dict["hide_prompt_meta"]
                 if "task_id" in meta:
                     config.current_task_id = int(meta["task_id"])  # 记录到 config 与 model
-                    model._current_task_id = int(meta["task_id"]) 
+                    model._current_task_id = int(meta["task_id"])
+                
+                # 恢复 dataset_map
+                if "dataset_map" in meta and hasattr(eprompt, "dataset_map"):
+                    eprompt.dataset_map.clear()  # 清空现有映射
+                    eprompt.dataset_map.update(meta["dataset_map"])  # 加载保存的映射
+                    print(f"HiDe-Prompt: 恢复 dataset_map，包含 {len(eprompt.dataset_map)} 个数据集映射: {dict(eprompt.dataset_map)}") 
             # 已处理专有字段，避免重复加载
             peft_model_state_dict = {}
         else:
