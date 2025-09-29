@@ -60,114 +60,10 @@ from peft.utils.save_and_load import (
 from uie_collator import DataCollatorForUIE
 from uie_dataset_lora import gen_cache_path
 
-from uie_trainer_lora import UIETrainer, DenserEvalCallback, skip_instructions, cls_mean, cls_cov
+from uie_trainer_lora import UIETrainer, DenserEvalCallback, skip_instructions, cls_mean, cls_cov, features_all
 from compute_metrics import compute_metrics, compute_grouped_metrics
 from model.llama import LlamaForCausalLM_with_lossmask
 
-
-def compute_class_means(model, data_loader, device, task_id, args, method='multi-centroid'):
-    """
-    计算各类别的特征均值和协方差，支持multi-centroid方式
-    
-    Args:
-        model: 训练模型
-        data_loader: 数据加载器
-        device: 设备
-        task_id: 当前任务ID
-        args: 训练参数
-        method: 计算方法 ('multi-centroid', 'covariance', 'variance')
-    """
-    import numpy as np
-    from sklearn.cluster import KMeans
-    
-    print(f"Computing class means for task {task_id} using method: {method}")
-    model.eval()
-    
-    # 收集当前任务的类别ID
-    class_ids = set()
-    with torch.no_grad():
-        for batch in data_loader:
-            if 'Dataset' in batch:
-                class_ids.update(batch['Dataset'])
-        
-        class_ids = list(class_ids)
-        print(f"Found {len(class_ids)} classes: {class_ids}")
-        
-        for cls_id in class_ids:
-            # 收集该类别的所有特征
-            features_per_cls = []
-            
-            for batch in data_loader:
-                if 'Dataset' in batch:
-                    # 过滤出当前类别的数据
-                    indices = [i for i, dataset in enumerate(batch['Dataset']) if dataset == cls_id]
-                    if not indices:
-                        continue
-                    
-                    # 准备输入
-                    inputs = {}
-                    for k, v in batch.items():
-                        if k != 'Dataset' and torch.is_tensor(v):
-                            inputs[k] = v[indices].to(device)
-                    
-                    if not inputs:
-                        continue
-                    
-                    outputs = model(**inputs)
-                    
-                    # 提取特征
-                    if hasattr(outputs, 'hidden_states') and outputs.hidden_states is not None:
-                        features = outputs.hidden_states[-1].mean(dim=1)
-                    elif hasattr(outputs, 'encoder_last_hidden_state') and outputs.encoder_last_hidden_state is not None:
-                        features = outputs.encoder_last_hidden_state.mean(dim=1)
-                    else:
-                        continue
-                    
-                    features_per_cls.append(features)
-            
-            if not features_per_cls:
-                print(f"No features found for class {cls_id}")
-                continue
-                
-            features_per_cls = torch.cat(features_per_cls, dim=0)
-            print(f"Class {cls_id}: {features_per_cls.size(0)} samples, feature dim: {features_per_cls.size(1)}")
-            
-            if method == 'multi-centroid':
-                n_clusters = getattr(args, 'n_centroids', 4)
-                features_np = features_per_cls.cpu().numpy()
-                
-                if len(features_np) < n_clusters:
-                    cls_mean[cls_id] = [features_per_cls.mean(dim=0)]
-                    cls_cov[cls_id] = [torch.var(features_per_cls, dim=0)]
-                else:
-                    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-                    kmeans.fit(features_np)
-                    cluster_labels = kmeans.labels_
-                    
-                    cluster_means = []
-                    cluster_vars = []
-                    
-                    for i in range(n_clusters):
-                        cluster_data = features_np[cluster_labels == i]
-                        if len(cluster_data) > 0:
-                            cluster_mean = torch.tensor(np.mean(cluster_data, axis=0), dtype=torch.float32).to(device)
-                            cluster_var = torch.tensor(np.var(cluster_data, axis=0), dtype=torch.float32).to(device)
-                            cluster_means.append(cluster_mean)
-                            cluster_vars.append(cluster_var)
-                    
-                    cls_mean[cls_id] = cluster_means
-                    cls_cov[cls_id] = cluster_vars
-                    print(f"Class {cls_id}: created {len(cluster_means)} centroids")
-            
-            elif method == 'covariance':
-                cls_mean[cls_id] = features_per_cls.mean(dim=0)
-                cls_cov[cls_id] = torch.cov(features_per_cls.T) + (torch.eye(features_per_cls.size(1)) * 1e-4).to(device)
-            
-            elif method == 'variance':
-                cls_mean[cls_id] = features_per_cls.mean(dim=0)
-                cls_cov[cls_id] = torch.diag(torch.cov(features_per_cls.T) + (torch.eye(features_per_cls.size(1)) * 1e-4).to(device))
-    
-    print(f"Class means computation completed. Total stored classes: {len(cls_mean)}")
 
 # off wandb
 os.environ['WANDB_DISABLED'] = "True"
@@ -378,7 +274,76 @@ class UIETrainingArguments(Seq2SeqTrainingArguments):
     hide_task_id: Optional[int] = field(default=None, metadata={"help": "Current task ID for HiDe-Prompt CL"})
     prompt_momentum: float = field(default=0.01, metadata={"help": "Momentum for post-task HiDe prompt update [0-1]"})
 
-
+@torch.no_grad()
+def _compute_mean(model: torch.nn.Module, device: torch.device, task_id,
+                  args=None, method='covariance'):
+    """
+    计算当前任务的类别统计信息，使用trainer中已收集的features_all
+    
+    Args:
+        model: 模型（未使用，保持接口一致）
+        device: 计算设备
+        task_id: 任务ID
+        args: 训练参数
+        method: 统计方法 ('covariance', 'variance', 'multi-centroid')
+    """
+    # 只在rank 0进程上计算
+    if args.world_size > 1 and args.local_rank != 0:
+        return
+    if not features_all:
+        print(f"Warning: features_all is empty for task {task_id}")
+        return
+    
+    # 合并所有收集的特征
+    features_per_cls = torch.cat([f for f in features_all if f is not None], dim=0)
+    
+    # 分布式训练：收集所有进程的特征
+    if args.world_size > 1:
+        features_per_cls_list = [torch.zeros_like(features_per_cls, device=device) for _ in range(args.world_size)]
+        torch.distributed.barrier()
+        torch.distributed.all_gather(features_per_cls_list, features_per_cls)
+        features_per_cls = torch.cat(features_per_cls_list, dim=0)
+    
+    print(f"Computing class statistics for task {task_id} using {features_per_cls.shape[0]} features with method '{method}'")
+    
+    if method == 'covariance':
+        cls_mean[task_id] = features_per_cls.mean(dim=0)
+        cls_cov[task_id] = torch.cov(features_per_cls.T) + (torch.eye(cls_mean[task_id].shape[-1]) * 1e-4).to(device)
+        
+    elif method == 'variance':
+        cls_mean[task_id] = features_per_cls.mean(dim=0)
+        cls_cov[task_id] = torch.diag(torch.cov(features_per_cls.T) + (torch.eye(cls_mean[task_id].shape[-1]) * 1e-4).to(device))
+        
+    elif method == 'multi-centroid':
+        import numpy as np
+        from sklearn.cluster import KMeans
+        
+        n_clusters = getattr(args, 'n_centroids', 5)
+        features_numpy = features_per_cls.cpu().numpy()
+        
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        kmeans.fit(features_numpy)
+        cluster_labels = kmeans.labels_
+        
+        cluster_means = []
+        cluster_vars = []
+        
+        for i in range(n_clusters):
+            cluster_mask = (cluster_labels == i)
+            if np.sum(cluster_mask) > 0:  # 确保簇不为空
+                cluster_data = features_numpy[cluster_mask]
+                cluster_mean = torch.tensor(np.mean(cluster_data, axis=0), dtype=torch.float32).to(device)
+                cluster_var = torch.tensor(np.var(cluster_data, axis=0), dtype=torch.float32).to(device)
+                cluster_means.append(cluster_mean)
+                cluster_vars.append(cluster_var)
+        
+        cls_mean[task_id] = cluster_means
+        cls_cov[task_id] = cluster_vars
+        
+    print(f"Task {task_id} statistics computed. cls_mean keys: {list(cls_mean.keys())}")
+    
+    # 清空features_all为下一个任务准备
+    features_all.clear()
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -552,7 +517,7 @@ def main():
             task_type=TaskType.SEQ_2_SEQ_LM,
             inference_mode=False,
             prompt_key=False,
-            pool_size=100,  # 明确设置prompt pool大小
+            pool_size=10,  # 明确设置prompt pool大小
             top_k=1
         )
         model = get_peft_model(model, peft_config)
@@ -877,19 +842,10 @@ def main():
                     print(
                         f"HiDe-Prompt: updated e_prompt for task {cur_task_id} with momentum={training_args.prompt_momentum}"
                     )
+            # 更新mean和cov
+            _compute_mean(model, training_args.device, task_id, args=training_args, method='covariance')
+
                 
-                # 计算当前任务的类别统计（用于后续任务的CR loss）
-                print(f"Computing class statistics for HiDe-Prompt CR loss...")
-                compute_class_means(
-                    model=base_model,
-                    data_loader=trainer.get_train_dataloader(),
-                    device=training_args.device,
-                    task_id=cur_task_id,
-                    args=training_args,
-                    method=getattr(training_args, 'ca_storage_efficient_method', 'multi-centroid')
-                )
-                print(f"Class statistics computation completed for task {cur_task_id}")
-                    
         except Exception as _e:
             logger.warning(f"HiDe-Prompt post-task update failed: {_e}")
 
