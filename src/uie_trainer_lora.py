@@ -41,8 +41,12 @@ def check_prompt_gradients(model, step=0, log_details=False):
 
 
 # 全局变量用于存储类别统计
+global cls_mean
+global cls_cov
+global features_all
 cls_mean = dict()
 cls_cov = dict()
+features_all = []  # 用于存储所有batch的特征表示
 
 
 def orth_loss(features, targets=None, device=None, args=None):
@@ -230,6 +234,9 @@ class UIETrainer(Seq2SeqTrainer):
 
         ####################### CR loss (HiDe-Prompt style) #######################
         features = self._extract_features(outputs, inputs)
+
+        ## 更新features_all  
+        features_all.append(features)
         
         if features is not None:
             cr_loss_val = orth_loss(features, None, self.args.device, self.args)
