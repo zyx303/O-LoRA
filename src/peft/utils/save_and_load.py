@@ -308,6 +308,19 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
                 print(f"HiDe-Prompt: 保存 dataset_map，包含 {len(eprompt.dataset_map)} 个数据集映射")
             
             to_return["hide_prompt_meta"] = hide_meta
+            
+            # 保存CR loss相关的类别统计信息
+            try:
+                from uie_trainer_lora import cls_mean, cls_cov
+                if cls_mean or cls_cov:
+                    cr_loss_data = {
+                        "cls_mean": {k: [v.cpu() if torch.is_tensor(v) else [t.cpu() for t in v] if isinstance(v, list) else v] for k, v in cls_mean.items()},
+                        "cls_cov": {k: [v.cpu() if torch.is_tensor(v) else [t.cpu() for t in v] if isinstance(v, list) else v] for k, v in cls_cov.items()}
+                    }
+                    to_return["cr_loss_data"] = cr_loss_data
+                    print(f"HiDe-Prompt: 保存 CR loss 数据，包含 {len(cls_mean)} 个类别统计")
+            except ImportError:
+                pass
         else:
             # 其他 PromptLearningConfig 维持原逻辑
             if config.inference_mode:
@@ -602,7 +615,32 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                 if "dataset_map" in meta and hasattr(eprompt, "dataset_map"):
                     eprompt.dataset_map.clear()  # 清空现有映射
                     eprompt.dataset_map.update(meta["dataset_map"])  # 加载保存的映射
-                    print(f"HiDe-Prompt: 恢复 dataset_map，包含 {len(eprompt.dataset_map)} 个数据集映射: {dict(eprompt.dataset_map)}") 
+                    print(f"HiDe-Prompt: 恢复 dataset_map，包含 {len(eprompt.dataset_map)} 个数据集映射: {dict(eprompt.dataset_map)}")
+            
+            # 恢复CR loss相关的类别统计信息
+            if "cr_loss_data" in state_dict:
+                try:
+                    from uie_trainer_lora import cls_mean, cls_cov
+                    cr_data = state_dict["cr_loss_data"]
+                    
+                    # 恢复cls_mean
+                    for k, v in cr_data.get("cls_mean", {}).items():
+                        if isinstance(v, list):
+                            cls_mean[k] = [torch.as_tensor(t) for t in v]
+                        else:
+                            cls_mean[k] = torch.as_tensor(v)
+                    
+                    # 恢复cls_cov  
+                    for k, v in cr_data.get("cls_cov", {}).items():
+                        if isinstance(v, list):
+                            cls_cov[k] = [torch.as_tensor(t) for t in v]
+                        else:
+                            cls_cov[k] = torch.as_tensor(v)
+                    
+                    print(f"HiDe-Prompt: 恢复 CR loss 数据，包含 {len(cls_mean)} 个类别统计")
+                except ImportError:
+                    print("Warning: 无法导入 cls_mean, cls_cov，跳过 CR loss 数据恢复")
+            
             # 已处理专有字段，避免重复加载
             peft_model_state_dict = {}
         else:

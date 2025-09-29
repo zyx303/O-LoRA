@@ -40,6 +40,52 @@ def check_prompt_gradients(model, step=0, log_details=False):
     return True
 
 
+# 全局变量用于存储类别统计
+cls_mean = dict()
+cls_cov = dict()
+
+
+def orth_loss(features, targets=None, device=None, args=None):
+    """
+    HiDe-Prompt风格的正交损失 (Orthogonal Loss)
+    
+    Args:
+        features: 模型输出的特征表示 [batch_size, feature_dim]
+        targets: 目标标签 (未使用，保持接口一致)
+        device: 设备
+        args: 训练参数，包含reg系数
+        
+    Returns:
+        torch.Tensor: 正交损失值
+    """
+    if features is None or features.size(0) == 0:
+        return torch.tensor(0.0, device=device, requires_grad=True)
+    
+    reg_coeff = getattr(args, 'reg', 0.01) if args else 0.01
+    temperature = 0.8  # 固定温度系数，与HiDe-Prompt保持一致
+    
+    if cls_mean:
+        # 使用已存储的类别均值
+        sample_mean = []
+        for k, v in cls_mean.items():
+            if isinstance(v, list):
+                sample_mean.extend(v)
+            else:
+                sample_mean.append(v)
+        
+        if sample_mean:
+            sample_mean = torch.stack(sample_mean, dim=0).to(device, non_blocking=True)
+            M = torch.cat([sample_mean, features], dim=0)
+            sim = torch.matmul(M, M.t()) / temperature
+            loss = torch.nn.functional.cross_entropy(sim, torch.arange(sim.shape[0], device=device, dtype=torch.long))
+            return reg_coeff * loss
+    
+    # 如果没有类别统计，使用当前batch的特征
+    sim = torch.matmul(features, features.t()) / temperature
+    loss = torch.nn.functional.cross_entropy(sim, torch.arange(features.size(0), device=device, dtype=torch.long))
+    return reg_coeff * loss
+
+
 def skip_instructions(model, predictions_ids, tokenizer, ignore_idx=-100):
     predictions_ids = np.where(predictions_ids == ignore_idx, tokenizer.pad_token_id, predictions_ids)
 
@@ -83,6 +129,20 @@ class DenserEvalCallback(TrainerCallback):
 
 
 class UIETrainer(Seq2SeqTrainer):
+    
+    def _extract_features(self, outputs, inputs=None):
+        """从模型输出中提取特征用于CR loss计算"""
+        if hasattr(outputs, 'hidden_states') and outputs.hidden_states is not None:
+            return outputs.hidden_states[-1].mean(dim=1)
+        elif hasattr(outputs, 'encoder_last_hidden_state') and outputs.encoder_last_hidden_state is not None:
+            return outputs.encoder_last_hidden_state.mean(dim=1)
+        elif isinstance(outputs, dict):
+            if 'hidden_states' in outputs and outputs['hidden_states'] is not None:
+                return outputs['hidden_states'][-1].mean(dim=1)
+            elif 'encoder_last_hidden_state' in outputs and outputs['encoder_last_hidden_state'] is not None:
+                return outputs['encoder_last_hidden_state'].mean(dim=1)
+        return None
+    
     # def create_optimizer(self):
     #     """创建具有不同参数组学习率的优化器"""
     #     if self.optimizer is None:
@@ -167,6 +227,18 @@ class UIETrainer(Seq2SeqTrainer):
         if 'reduce_sim' in outputs:
             l2p_loss = outputs['reduce_sim']
             loss -= l2p_loss * self.args.pull_constraint_coeff
+
+        ####################### CR loss (HiDe-Prompt style) #######################
+        features = self._extract_features(outputs, inputs)
+        
+        if features is not None:
+            cr_loss_val = orth_loss(features, None, self.args.device, self.args)
+            loss += cr_loss_val
+            
+            # 记录CR loss
+            if self.state.global_step % 50 == 0:
+                print(f"Step {self.state.global_step}: CR Loss = {cr_loss_val.item():.6f}")
+                sys.stdout.flush()
 
         ########################### Regularization ##########################
         
