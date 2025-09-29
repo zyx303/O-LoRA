@@ -312,7 +312,7 @@ def main():
     # get task id 
     import re, os
     m = re.match(r"^(\d+)-", os.path.basename(os.path.normpath(training_args.output_dir)))
-    task_id = int(m.group(1)) if m else None
+    task_id = int(m.group(1)) - 1 if m else None
     print('task_id：', task_id)
 
     m_name = re.match(r"^\d+-(.*)", os.path.basename(os.path.normpath(training_args.output_dir)))
@@ -471,7 +471,7 @@ def main():
     #             else:
     #                 logger.info(f"Auto-determined task_id from config '{data_args.task_config_dir}': {task_id}")
             
-    #         set_hide_prompt_task_id(model, task_id)
+    set_hide_prompt_task_id(model, task_id)
     #         logger.info(f"Successfully set HiDe-Prompt task_id to: {task_id} (config: {data_args.task_config_dir})")
     # except Exception as _e:
     #     logger.warning(f"Failed to set HiDe task id pre-training: {_e}")
@@ -748,93 +748,16 @@ def main():
         #     trainer.lr_scheduler = scheduler
             # trainer.lr_scheduler = custom_scheduler
 
-
-        if model_args.peft_type.upper() == "INFLORA":
-            trainer.model.base_model._cur_task = task_id-1
-            # get current feature matrix
-            print('----------------------------first run----------------------------')
-            base = trainer.model.base_model
-            trainer.args.get_cur_feat = True
-            for m in base.modules():
-                if isinstance(m, InfLoraLayer) :
-                    # m.get_feat = getattr(trainer.args, "get_feat", False)
-                    m.get_cur_feat = True
-                    # print(f"Set {name} get_feat to {module.get_feat}, get_cur_feat to {module.get_cur_feat}")
-            trainer.train(resume_from_checkpoint=checkpoint)
-            for m in base.modules():
-                if isinstance(m, InfLoraLayer) :
-                    # m.get_feat = getattr(trainer.args, "get_feat", False)
-                    m.get_cur_feat = False
-            trainer.args.get_cur_feat = False
-            
-            # InfLoraModel
-            print("Initialize loranew_A with SVD of current collected gradients")
-            base = trainer.model.base_model
-            # set loranew_A 
-            # task == 0 
-            if 'adapter' not in model_args.model_name_or_path:
-                for module in base.modules():
-                    if isinstance(module, InfLoraLayer):
-                        adapter = getattr(module, "active_adapter", "default")
-                        cur_matrix = module.cur_matrix
-                        U, S, V = torch.linalg.svd(cur_matrix)
-                        module.loranew_A[adapter].weight.data.copy_(U[:,:module.r[adapter]].T/math.sqrt(3))
-                        module.cur_matrix.zero_()
-                        module.n_cur_matrix = 0
-            # task >= 1
-            else:
-                kk = 0
-                for module in base.modules():
-                    if isinstance(module, InfLoraLayer):
-                        adapter = getattr(module, "active_adapter", "default")
-                        cur_matrix = module.cur_matrix.to(base.feature_mat[kk].device)
-                        if base.project_type[kk] == 'remove':
-                            cur_matrix = cur_matrix - torch.mm(base.feature_mat[kk],cur_matrix)
-                        else:
-                            assert base.project_type[kk] == 'retain'
-                            cur_matrix = torch.mm(base.feature_mat[kk],cur_matrix)
-                        cU, cS, cV = torch.linalg.svd(cur_matrix, full_matrices=False)
-                        module.loranew_A[adapter].weight.data.copy_(cU[:,:module.r[adapter]].T/math.sqrt(3))
-                        module.cur_matrix.zero_()
-                        module.n_cur_matrix = 0
-                        kk += 1
-            print("Initialization done!")
-                        
-        
-        train_result = trainer.train(resume_from_checkpoint=checkpoint)
-        
-        if model_args.peft_type.upper() == "INFLORA":
-            print("getting feature directions for task ", task_id-1)
-            base = trainer.model.base_model
-            # get current feature matrix
-            trainer.args.get_cur_feat = True
-            for m in base.modules():
-                if isinstance(m, InfLoraLayer) :
-                    # m.get_feat = getattr(trainer.args, "get_feat", False)
-                    m.get_cur_feat = True
-            trainer.train(resume_from_checkpoint=checkpoint)
-            for m in base.modules():
-                if isinstance(m, InfLoraLayer) :
-                    # m.get_feat = getattr(trainer.args, "get_feat", False)
-                    m.get_cur_feat = False
-            trainer.args.get_cur_feat = False   
+        # transfer previous prompt key if not the first task
+        if task_id > 0:
+            cur_idx = (slice(None), slice(None), slice(task_id, task_id+1))
+            prev_idx = (slice(None), slice(None),slice(task_id-1, task_id))
+            if model.prompt_encoder[model.active_adapter].prompt.grad is not None:
+                model.prompt_encoder[model.active_adapter].prompt.grad.zero_()
             with torch.no_grad():
-                mat_list = []
-                for module in base.modules():
-                    if isinstance(module, InfLoraLayer):
-                        mat_list.append(deepcopy(module.cur_matrix))
-                        module.cur_matrix.zero_()
-                        module.n_cur_matrix = 0
-                # self.update_GPM(mat_list)
-                base.update_DualGPM(mat_list)
+                model.prompt_encoder[model.active_adapter].prompt[cur_idx] = model.prompt_encoder[model.active_adapter].prompt[prev_idx]
 
-                # Projection Matrix Precomputation
-                base.feature_mat = []
-                for p in range(len(base.feature_list)):
-                    Uf=torch.Tensor(np.dot(base.feature_list[p],base.feature_list[p].transpose()))
-                    # print('Layer {} - Projection Matrix shape: {}'.format(p+1,Uf.shape))
-                    base.feature_mat.append(Uf)
-            print("Feature directions for task ", task_id-1, " stored!")
+        train_result = trainer.train(resume_from_checkpoint=checkpoint)
 
         # For HiDe-Prompt: apply momentum update on e_prompt after finishing this task, then save
         try:
