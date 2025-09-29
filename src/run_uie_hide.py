@@ -376,7 +376,7 @@ class UIETrainingArguments(Seq2SeqTrainingArguments):
     logging_steps: int = field(default=10)
     # HiDe-Prompt continual learning parameters
     hide_task_id: Optional[int] = field(default=None, metadata={"help": "Current task ID for HiDe-Prompt CL"})
-    prompt_momentum: float = field(default=0.0, metadata={"help": "Momentum for post-task HiDe prompt update [0-1]"})
+    prompt_momentum: float = field(default=0.01, metadata={"help": "Momentum for post-task HiDe prompt update [0-1]"})
 
 
 

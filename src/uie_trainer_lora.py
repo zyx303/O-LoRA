@@ -61,7 +61,7 @@ def orth_loss(features, targets=None, device=None, args=None):
     if features is None or features.size(0) == 0:
         return torch.tensor(0.0, device=device, requires_grad=True)
     
-    reg_coeff = getattr(args, 'reg', 0.01) if args else 0.01
+    reg_coeff = getattr(args, 'reg', 0.1) if args else 0.1
     temperature = 0.8  # 固定温度系数，与HiDe-Prompt保持一致
     
     if cls_mean:
@@ -229,16 +229,17 @@ class UIETrainer(Seq2SeqTrainer):
             loss -= l2p_loss * self.args.pull_constraint_coeff
 
         ####################### CR loss (HiDe-Prompt style) #######################
-        features = self._extract_features(outputs, inputs)
-        
-        if features is not None:
-            cr_loss_val = orth_loss(features, None, self.args.device, self.args)
-            loss += cr_loss_val
+        if getattr(model, "peft_type", "").upper() == "HIDE_PROMPT":
+            features = self._extract_features(outputs, inputs)
             
-            # 记录CR loss
-            if self.state.global_step % 50 == 0:
-                print(f"Step {self.state.global_step}: CR Loss = {cr_loss_val.item():.6f}")
-                sys.stdout.flush()
+            if features is not None:
+                cr_loss_val = orth_loss(features, None, self.args.device, self.args)
+                loss += cr_loss_val
+                
+                # 记录CR loss
+                if self.state.global_step % 50 == 0:
+                    print(f"Step {self.state.global_step}: CR Loss = {cr_loss_val.item():.6f}")
+                    sys.stdout.flush()
 
         ########################### Regularization ##########################
         
