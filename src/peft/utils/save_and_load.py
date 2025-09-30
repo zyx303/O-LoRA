@@ -321,6 +321,19 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
                     print(f"HiDe-Prompt: 保存 CR loss 数据，包含 {len(cls_mean)} 个类别统计")
             except ImportError:
                 pass
+            
+            for key, value in state_dict.items():
+                # 保存 lm_head, shared, embed_tokens 等语言模型关键组件
+                if any(module_name in key for module_name in ["lm_head", "shared", "embed_tokens"]):
+                    # 去除可能的 adapter 后缀，确保键名的一致性
+                    clean_key = key.replace(f".{adapter_name}", "")
+                    to_return[clean_key] = value
+                    print(f"HiDe-Prompt: 保存关键模块 {clean_key}")
+                # 也保存分类器等任务相关的头部
+                elif any(module_name in key for module_name in ["classifier", "score"]):
+                    clean_key = key.replace(f".{adapter_name}", "")
+                    to_return[clean_key] = value
+                    print(f"HiDe-Prompt: 保存任务模块 {clean_key}")
         else:
             # 其他 PromptLearningConfig 维持原逻辑
             if config.inference_mode:
@@ -626,23 +639,51 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                     # 恢复cls_mean
                     for k, v in cr_data.get("cls_mean", {}).items():
                         if isinstance(v, list):
-                            cls_mean[k] = [torch.as_tensor(t) for t in v]
+                            cls_mean[k] = []
+                            for t in v:
+                                if torch.is_tensor(t):
+                                    cls_mean[k].append(t)
+                                else:
+                                    cls_mean[k].append(torch.as_tensor(t[0]))
                         else:
-                            cls_mean[k] = torch.as_tensor(v)
+                            if torch.is_tensor(v):
+                                cls_mean[k] = v
+                            else:
+                                cls_mean[k] = torch.as_tensor(v)
                     
                     # 恢复cls_cov  
                     for k, v in cr_data.get("cls_cov", {}).items():
                         if isinstance(v, list):
-                            cls_cov[k] = [torch.as_tensor(t) for t in v]
+                            cls_cov[k] = []
+                            for t in v:
+                                if torch.is_tensor(t):
+                                    cls_cov[k].append(t)
+                                else:
+                                    cls_cov[k].append(torch.as_tensor(t[0]))
                         else:
-                            cls_cov[k] = torch.as_tensor(v)
+                            if torch.is_tensor(v):
+                                cls_cov[k] = v
+                            else:
+                                cls_cov[k] = torch.as_tensor(v)
                     
                     print(f"HiDe-Prompt: 恢复 CR loss 数据，包含 {len(cls_mean)} 个类别统计")
                 except ImportError:
                     print("Warning: 无法导入 cls_mean, cls_cov，跳过 CR loss 数据恢复")
             
-            # 已处理专有字段，避免重复加载
+            # 分离出需要加载到模型的权重（lm_head, shared 等关键模块）
             peft_model_state_dict = {}
+            for k, v in state_dict.items():
+                # 处理关键模块权重：lm_head, shared, embed_tokens, classifier, score
+                if any(module_name in k for module_name in ["lm_head", "shared", "embed_tokens", "classifier", "score"]):
+                    # 这些权重直接加载到模型中，无需特殊处理
+                    peft_model_state_dict[k] = v
+                    print(f"HiDe-Prompt: 准备加载关键模块 {k}")
+                # 跳过已经处理的 HiDe-Prompt 专有字段
+                elif k in ["hide_prompt_pool", "hide_prompt_key", "hide_prompt_meta", "cr_loss_data"]:
+                    continue
+                else:
+                    # 其他权重正常加载
+                    peft_model_state_dict[k] = v
         else:
             peft_model_state_dict = state_dict
     else:

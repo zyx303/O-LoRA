@@ -261,7 +261,7 @@ class UIETrainingArguments(Seq2SeqTrainingArguments):
     lamda_2: float = field(default = 0)
     regularization: bool = field(default=False)
     # L2P continual learning parameters
-    pool_size: int = field(default=50, metadata={"help": "Size of the L2P prompt pool"})
+    pool_size: int = field(default=10, metadata={"help": "Size of the L2P prompt pool"})
     l2p_top_k: int = field(default=5, metadata={"help": "Number of top prompts to select in L2P"})
     l2p_task_id: Optional[int] = field(default=None, metadata={"help": "Current task ID for L2P continual learning"})
     l2p_num_classes: Optional[int] = field(default=None, metadata={"help": "Number of classes in current task"})
@@ -273,6 +273,12 @@ class UIETrainingArguments(Seq2SeqTrainingArguments):
     # HiDe-Prompt continual learning parameters
     hide_task_id: Optional[int] = field(default=None, metadata={"help": "Current task ID for HiDe-Prompt CL"})
     prompt_momentum: float = field(default=0.01, metadata={"help": "Momentum for post-task HiDe prompt update [0-1]"})
+    # Task adaptive prediction parameters
+    not_train_ca: bool = field(default=False, metadata={"help": "Whether to skip task adaptive prediction training"})
+    crct_epochs: int = field(default=5, metadata={"help": "Number of epochs for task adaptive prediction training"})
+    ca_lr: float = field(default=1e-4, metadata={"help": "Learning rate for task adaptive prediction training"})
+    ca_storage_efficient_method: str = field(default="covariance", metadata={"help": "Method for storing class statistics: covariance, variance, or multi-centroid"})
+    n_centroids: int = field(default=5, metadata={"help": "Number of centroids for multi-centroid method"})
 
 @torch.no_grad()
 def _compute_mean(model: torch.nn.Module, device: torch.device, task_id,
@@ -287,9 +293,9 @@ def _compute_mean(model: torch.nn.Module, device: torch.device, task_id,
         args: 训练参数
         method: 统计方法 ('covariance', 'variance', 'multi-centroid')
     """
-    # 只在rank 0进程上计算
-    if args.world_size > 1 and args.local_rank != 0:
-        return
+    # # 只在rank 0进程上计算
+    # if args.world_size > 1 and args.local_rank != 0:
+    #     return
     if not features_all:
         print(f"Warning: features_all is empty for task {task_id}")
         return
@@ -308,7 +314,8 @@ def _compute_mean(model: torch.nn.Module, device: torch.device, task_id,
     
     if method == 'covariance':
         cls_mean[task_id] = features_per_cls.mean(dim=0)
-        cls_cov[task_id] = torch.cov(features_per_cls.T) + (torch.eye(cls_mean[task_id].shape[-1]) * 1e-4).to(device)
+        # TODO 
+        # cls_cov[task_id] = torch.cov(features_per_cls.T) + (torch.eye(cls_mean[task_id].shape[-1]) * 1e-4).to(device)
         
     elif method == 'variance':
         cls_mean[task_id] = features_per_cls.mean(dim=0)
@@ -318,7 +325,7 @@ def _compute_mean(model: torch.nn.Module, device: torch.device, task_id,
         import numpy as np
         from sklearn.cluster import KMeans
         
-        n_clusters = getattr(args, 'n_centroids', 5)
+        n_clusters = args.n_centroids
         features_numpy = features_per_cls.cpu().numpy()
         
         kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
@@ -344,6 +351,210 @@ def _compute_mean(model: torch.nn.Module, device: torch.device, task_id,
     
     # 清空features_all为下一个任务准备
     features_all.clear()
+
+def train_task_adaptive_prediction(model, tokenizer, args, device, task_id=-1, method='covariance'):
+    """
+    HiDe-Prompt版本的任务自适应预测训练
+    
+    Args:
+        model: HiDe-Prompt模型
+        tokenizer: 分词器 
+        args: 训练参数
+        device: 计算设备
+        task_id: 当前任务ID
+        method: 统计方法 ('covariance', 'variance', 'multi-centroid')
+    """
+    # 只在rank 0进程上执行
+    if args.world_size > 1 and args.local_rank != 0:
+        return
+        
+    if not cls_mean or task_id == 0:
+        print(f"Skipping task adaptive prediction for task {task_id} (no previous tasks or missing statistics)")
+        return
+    
+    print(f"Starting task adaptive prediction training for task {task_id}")
+    
+    model.train()
+    
+    # 训练参数设置
+    run_epochs = args.crct_epochs
+    ca_lr = args.ca_lr
+    batch_size = args.per_device_train_batch_size
+    num_sampled_per_task = batch_size * 5  # 每个任务采样的数据量
+    
+    # 获取可训练参数（排除HiDe-Prompt相关参数，只训练分类头）
+    param_list = []
+    for name, param in model.named_parameters():
+        if param.requires_grad and not any(key in name for key in ["prompt", "prompt_key"]):
+            param_list.append(param)
+    
+    if not param_list:
+        print("No trainable parameters found for task adaptive prediction")
+        return
+    
+    # 设置优化器和调度器
+    network_params = [{'params': param_list, 'lr': ca_lr, 'weight_decay': args.weight_decay}]
+    optimizer = torch.optim.AdamW(network_params, lr=ca_lr, weight_decay=args.weight_decay)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=run_epochs)
+    criterion = torch.nn.CrossEntropyLoss().to(device)
+    
+    print(f"Task adaptive prediction - Epochs: {run_epochs}, LR: {ca_lr}, Trainable params: {len(param_list)}")
+    
+    for epoch in range(run_epochs):
+        print(f"Task adaptive prediction - Epoch {epoch + 1}/{run_epochs}")
+        
+        # 为每个之前的任务生成合成数据
+        all_sampled_features = []
+        all_sampled_labels = []
+        
+        for prev_task_id in range(task_id):
+            if prev_task_id not in cls_mean:
+                continue
+                
+            if method in ['covariance', 'variance']:
+                mean = cls_mean[prev_task_id][0]
+                cov = cls_cov[prev_task_id][0]
+                
+                if method == 'variance':
+                    cov = torch.diag(cov)
+                
+                from torch.distributions.multivariate_normal import MultivariateNormal
+                m = MultivariateNormal(mean.float(), cov.float())
+                sampled_features = m.sample(sample_shape=(num_sampled_per_task,))
+                
+                all_sampled_features.append(sampled_features)
+                all_sampled_labels.extend([prev_task_id] * num_sampled_per_task)
+                    
+            elif method == 'multi-centroid':
+                cluster_means = cls_mean[prev_task_id][0]   
+                cluster_vars = cls_cov[prev_task_id][0]
+                
+                for cluster_idx, (cluster_mean, cluster_var) in enumerate(zip(cluster_means, cluster_vars)):
+                    if cluster_var.mean() == 0:
+                        continue
+                        
+                    try:
+                        cov_matrix = torch.diag(cluster_var) + 1e-4 * torch.eye(cluster_mean.shape[0]).to(cluster_mean.device)
+                        m = MultivariateNormal(cluster_mean.float(), cov_matrix.float())
+                        sampled_features = m.sample(sample_shape=(num_sampled_per_task // len(cluster_means),))
+                        
+                        all_sampled_features.append(sampled_features)
+                        all_sampled_labels.extend([prev_task_id] * (num_sampled_per_task // len(cluster_means)))
+                        
+                    except Exception as e:
+                        print(f"Error sampling cluster {cluster_idx} for task {prev_task_id}: {e}")
+                        continue
+        
+        if not all_sampled_features:
+            print(f"No valid sampled features for epoch {epoch}, skipping")
+            continue
+            
+        # 合并所有采样的特征
+        sampled_features = torch.cat(all_sampled_features, dim=0).float().to(device)
+        sampled_labels = torch.tensor(all_sampled_labels).long().to(device)
+        
+        # 随机打乱数据
+        shuffle_indices = torch.randperm(sampled_features.size(0))
+        sampled_features = sampled_features[shuffle_indices]
+        sampled_labels = sampled_labels[shuffle_indices]
+        
+        print(f"Generated {sampled_features.shape[0]} synthetic samples for {len(set(all_sampled_labels))} previous tasks")
+        
+        # 分批训练
+        num_batches = (sampled_features.size(0) + batch_size - 1) // batch_size
+        epoch_loss = 0.0
+        epoch_acc = 0.0
+        
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min((batch_idx + 1) * batch_size, sampled_features.size(0))
+            
+            batch_features = sampled_features[start_idx:end_idx]
+            batch_labels = sampled_labels[start_idx:end_idx]
+            
+            # 使用模型的forward方法，但只计算logits
+            try:
+                # 这里我们直接使用特征通过模型的分类头或语言建模头
+                
+                # 首先尝试直接使用features作为hidden states
+                if hasattr(model, 'base_model') and hasattr(model.base_model, 'lm_head'):
+                    # 对于因果语言模型，直接通过lm_head
+                    logits = model.base_model.lm_head(batch_features)
+                elif hasattr(model, 'lm_head'):
+                    # 直接通过lm_head
+                    logits = model.lm_head(batch_features)
+                elif hasattr(model, 'classifier'):
+                    # 对于分类模型
+                    logits = model.classifier(batch_features)
+                # else:
+                #     # 尝试使用inputs_embeds方式
+                #     # 为每个特征创建一个假的token序列
+                #     batch_size = batch_features.size(0)
+                #     seq_len = 1  # 使用单个token
+                #     inputs_embeds = batch_features.unsqueeze(1)  # [batch_size, 1, hidden_size]
+                    
+                #     # 创建attention mask
+                #     attention_mask = torch.ones(batch_size, seq_len, device=device)
+                    
+                #     outputs = model(
+                #         inputs_embeds=inputs_embeds,
+                #         attention_mask=attention_mask,
+                #         return_dict=True
+                #     )
+                #     logits = outputs.logits
+                    
+                #     # 取最后一个token的logits
+                #     if logits.dim() == 3:  # [batch_size, seq_len, vocab_size]
+                #         logits = logits[:, -1, :]  # 取最后一个token
+                
+                # 确保logits维度正确
+                if logits.dim() > 2:
+                    logits = logits.view(-1, logits.size(-1))
+                
+                # 如果logits的词汇表大小与任务数不匹配，我们需要映射,TODO 不合理
+                num_tasks = max(all_sampled_labels) + 1
+                if logits.size(-1) != num_tasks:
+                    # 使用简单的线性变换映射到正确的任务数
+                    # 这里我们只使用logits的前num_tasks个维度，或者进行平均池化
+                    if logits.size(-1) > num_tasks:
+                        # 如果logits维度大于任务数，取前num_tasks个
+                        logits = logits[:, :num_tasks]
+                    else:
+                        # 如果logits维度小于任务数，重复填充或使用线性层
+                        # 为了简单起见，我们使用平均值来填充缺失的维度
+                        padding_size = num_tasks - logits.size(-1)
+                        padding = torch.mean(logits, dim=-1, keepdim=True).repeat(1, padding_size)
+                        logits = torch.cat([logits, padding], dim=-1)
+                
+                loss = criterion(logits, batch_labels)
+                
+                # 计算准确率
+                pred = torch.argmax(logits, dim=-1)
+                acc = (pred == batch_labels).float().mean()
+                
+                # 反向传播
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                
+                epoch_loss += loss.item()
+                epoch_acc += acc.item()
+                
+            except Exception as e:
+                print(f"Error in batch {batch_idx}: {e}")
+                print(f"Model type: {type(model)}")
+                print(f"Batch features shape: {batch_features.shape}")
+                print(f"Available model attributes: {[attr for attr in dir(model) if not attr.startswith('_')][:10]}")
+                continue
+        
+        avg_loss = epoch_loss / num_batches if num_batches > 0 else 0.0
+        avg_acc = epoch_acc / num_batches if num_batches > 0 else 0.0
+        
+        print(f"Epoch {epoch + 1} - Loss: {avg_loss:.4f}, Acc: {avg_acc:.4f}, LR: {optimizer.param_groups[0]['lr']:.6f}")
+        
+        scheduler.step()
+    
+    print(f"Task adaptive prediction training completed for task {task_id}")
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -482,6 +693,9 @@ def main():
         
     if 'adapter' in model_args.model_name_or_path: # add lora-adapter to the original model
         model = model_class.from_pretrained(config.base_model_name_or_path)
+        # 先调整token embeddings大小，再加载adapter
+        model.resize_token_embeddings(len(tokenizer))
+        print(f"len(tokenizer): {len(tokenizer)}")
         model = PeftModel.from_pretrained(model, model_args.model_name_or_path)
     elif 'llama' in model_args.model_name_or_path.lower():
         model = model_class.from_pretrained(
@@ -523,8 +737,10 @@ def main():
         model = get_peft_model(model, peft_config)
         with open(os.path.join(training_args.output_dir, "config.json"), "w") as f:
             json.dump(training_args.to_dict(), f, indent=4)
-    model.resize_token_embeddings(len(tokenizer))
-
+        # 对于新训练的模型，也需要调整token embeddings大小
+        model.resize_token_embeddings(len(tokenizer))
+    # 注意：对于从adapter加载的模型，resize_token_embeddings已经在加载前执行了
+    print(f"len(tokenizer): {len(tokenizer)}")
     # If using HiDe-Prompt, set task_id based on continual learning order
     # try:
     #     if model_args.peft_type.upper() == "HIDE_PROMPT":
@@ -616,7 +832,7 @@ def main():
                 trainable_params += param.numel()
                 print(f"  Trainable: {name} ({param.numel()} params)")
             # Also allow classification head to be trainable if it exists
-            elif any(key in name for key in ["classifier", "lm_head", "score"]):
+            elif any(key in name for key in ["classifier", "lm_head", "score","shared"]):
                 param.requires_grad = True
                 trainable_params += param.numel()
                 print(f"  Trainable: {name} ({param.numel()} params)")
@@ -842,8 +1058,21 @@ def main():
                     print(
                         f"HiDe-Prompt: updated e_prompt for task {cur_task_id} with momentum={training_args.prompt_momentum}"
                     )
+            
             # 更新mean和cov
-            _compute_mean(model, training_args.device, task_id, args=training_args, method='covariance')
+            _compute_mean(model, training_args.device, task_id, args=training_args, method=training_args.ca_storage_efficient_method)
+            
+            # # 如果不是第一个任务，执行任务自适应预测训练
+            # if task_id > 0 and not training_args.not_train_ca:
+            #     print(f"Starting task adaptive prediction training for task {task_id}")
+            #     train_task_adaptive_prediction(
+            #         model=trainer.model,
+            #         tokenizer=tokenizer,
+            #         args=training_args,
+            #         device=training_args.device,
+            #         task_id=task_id,
+            #         method=training_args.ca_storage_efficient_method
+            #     )
 
                 
         except Exception as _e:
