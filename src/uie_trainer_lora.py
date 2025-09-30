@@ -244,7 +244,7 @@ class UIETrainer(Seq2SeqTrainer):
                 loss += cr_loss_val
                 
                 # 记录CR loss
-                if self.state.global_step % 50 == 0:
+                if self.state.global_step % 10 == 0:
                     print(f"Step {self.state.global_step}: CR Loss = {cr_loss_val.item():.6f}")
                     sys.stdout.flush()
 
@@ -541,14 +541,14 @@ class UIETrainer(Seq2SeqTrainer):
         )
         
         # 打印生成的token ID和对应的文本（通过环境变量控制）
-        print("=== 生成结果 ===")
-        for i, tokens in enumerate(generated_tokens):
-            decoded_text = self.tokenizer.decode(tokens, skip_special_tokens=True)
-            print(f"样本 {i}: {decoded_text}")
-            # 也打印token IDs
-            print(f"Token IDs: {tokens.tolist()}")
-        print("===============")
-        sys.stdout.flush()
+        # print("=== 生成结果 ===")
+        # for i, tokens in enumerate(generated_tokens):
+        #     decoded_text = self.tokenizer.decode(tokens, skip_special_tokens=True)
+        #     print(f"样本 {i}: {decoded_text}")
+        #     # 也打印token IDs
+        #     print(f"Token IDs: {tokens.tolist()}")
+        # print("===============")
+        # sys.stdout.flush()
 
         bs, source_len = inputs['input_ids'].shape
         # in case the batch is shorter than max length, the output should be padded
