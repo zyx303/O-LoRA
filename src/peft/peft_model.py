@@ -905,18 +905,55 @@ class PeftModelForCausalLM(PeftModel):
                 prompt_momentum=kwargs.pop("prompt_momentum", 0),
                 dataset_names=kwargs.pop("Dataset", None),
             )
-            batched_prompt = out["batched_prompt"][0]  # (B, P, C)
+            
+            # Get the full multi-layer prompt structure like in seq2seq
+            batched_prompt = out["batched_prompt"]  # (num_layers, B, 2, P, H, D)
+            
+            # Reshape batched_prompt to prefix_tuning format (aligned with seq2seq)
+            num_layers, batch_size, dual, prompt_length, num_heads, head_dim = batched_prompt.shape
+            
+            # Reshape to (batch_size, prompt_length, num_layers * 2, num_heads, head_dim)
+            past_key_values = batched_prompt.permute(1, 3, 0, 2, 4, 5).contiguous()  # (B, P, num_layers, 2, H, D)
+            past_key_values = past_key_values.view(
+                batch_size,
+                prompt_length,
+                num_layers * 2,
+                num_heads,
+                head_dim
+            )
+            
+            # For causal LM (num_transformer_submodules == 1), no need to duplicate KV pairs
+            # Apply the same permute and split as in seq2seq
+            past_key_values = past_key_values.permute([2, 0, 3, 1, 4]).split(
+                peft_config.num_transformer_submodules * 2
+            )
+            
+            # Apply post-processing function if exists (aligned with seq2seq)
+            if TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING.get(self.config.model_type, None) is not None:
+                post_process_fn = TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING[self.config.model_type]
+                past_key_values = post_process_fn(past_key_values)
 
-            # Extend attention mask and labels
+            # Adjust attention mask for past_key_values approach
             if attention_mask is not None:
-                prefix_attention_mask = torch.ones(inputs_embeds.shape[0], batched_prompt.shape[1], device=attention_mask.device)
-                kwargs["attention_mask"] = torch.cat((prefix_attention_mask, attention_mask), dim=1)
+                # Create attention mask for prompts (all 1s)
+                prompt_attention_mask = torch.ones(
+                    batch_size, prompt_length, device=attention_mask.device, dtype=attention_mask.dtype
+                )
+                # Concatenate prompt attention mask with input attention mask
+                kwargs["attention_mask"] = torch.cat((prompt_attention_mask, attention_mask), dim=1)
+            
+            # For past_key_values approach, labels should match the input sequence length
+            # since logits will only be computed for the input sequence, not the prompts
             if labels is not None:
-                prefix_labels = torch.full((inputs_embeds.shape[0], batched_prompt.shape[1]), -100, device=labels.device)
-                kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
+                # Ensure labels match the input sequence length
+                kwargs["labels"] = labels
 
-            inputs_embeds = torch.cat((batched_prompt.to(inputs_embeds.dtype), inputs_embeds), dim=1)
-            return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
+            # Use past_key_values approach instead of simple concatenation
+            return self.base_model(
+                inputs_embeds=inputs_embeds,
+                past_key_values=past_key_values,
+                **kwargs,
+            )
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
@@ -981,6 +1018,15 @@ class PeftModelForCausalLM(PeftModel):
                 model_kwargs["attention_mask"] = torch.cat(
                     (prefix_attention_mask, model_kwargs["attention_mask"]), dim=1
                 )
+            elif peft_config.peft_type == PeftType.HIDE_PROMPT:
+                # HiDe-Prompt也需要每一步都拼接attention_mask（和PREFIX_TUNING一样）
+                if model_kwargs.get("attention_mask", None) is not None:
+                    prefix_attention_mask = torch.ones(
+                        model_kwargs["input_ids"].shape[0], peft_config.num_virtual_tokens
+                    ).to(model_kwargs["input_ids"].device)
+                    model_kwargs["attention_mask"] = torch.cat(
+                        (prefix_attention_mask, model_kwargs["attention_mask"]), dim=1
+                    )
 
             if model_kwargs["past_key_values"] is None and peft_config.peft_type == PeftType.PREFIX_TUNING:
                 past_key_values = self.get_prompt(batch_size=model_kwargs["input_ids"].shape[0])
@@ -1030,23 +1076,48 @@ class PeftModelForCausalLM(PeftModel):
                         input_ids = model_kwargs["input_ids"]
                         inputs_embeds = self.word_embeddings(input_ids)
                         eprompt: HiDeEPrompt = self.prompt_encoder[self.active_adapter]
+                        dataset_names = getattr(self, '_current_datasets', None)
                         out = eprompt(
                             x_embed=inputs_embeds,
                             prompt_mask=model_kwargs.pop("prompt_mask", None),
                             prompt_idx=model_kwargs.pop("prompt_idx", None),
                             prompt_weight=model_kwargs.pop("prompt_weight", None),
                             prompt_momentum=model_kwargs.pop("prompt_momentum", 0),
+                            dataset_names=dataset_names,
                         )
-                        batched_prompt = out["batched_prompt"][0]
-                        if model_kwargs.get("attention_mask", None) is not None:
-                            prefix_attention_mask = torch.ones(
-                                input_ids.shape[0], batched_prompt.shape[1], device=model_kwargs["attention_mask"].device
-                            )
-                            model_kwargs["attention_mask"] = torch.cat(
-                                (prefix_attention_mask, model_kwargs["attention_mask"]), dim=1
-                            )
-                        model_kwargs["inputs_embeds"] = torch.cat((batched_prompt, inputs_embeds), dim=1)
-                        model_kwargs["input_ids"] = None
+                        
+                        # Get the full multi-layer prompt structure like in seq2seq
+                        batched_prompt = out["batched_prompt"]  # (num_layers, B, 2, P, H, D)
+                        
+                        # Reshape batched_prompt to prefix_tuning format (aligned with seq2seq)
+                        num_layers, batch_size, dual, prompt_length, num_heads, head_dim = batched_prompt.shape
+                        
+                        # Reshape to (batch_size, prompt_length, num_layers * 2, num_heads, head_dim)
+                        past_key_values = batched_prompt.permute(1, 3, 0, 2, 4, 5).contiguous()  # (B, P, num_layers, 2, H, D)
+                        past_key_values = past_key_values.view(
+                            batch_size,
+                            prompt_length,
+                            num_layers * 2,
+                            num_heads,
+                            head_dim
+                        )
+                        
+                        # For causal LM (num_transformer_submodules == 1), no need to duplicate KV pairs
+                        # Apply the same permute and split as in seq2seq
+                        past_key_values = past_key_values.permute([2, 0, 3, 1, 4]).split(
+                            peft_config.num_transformer_submodules * 2
+                        )
+                        
+                        # Apply post-processing function if exists (aligned with seq2seq)
+                        if TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING.get(self.config.model_type, None) is not None:
+                            post_process_fn = TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING[self.config.model_type]
+                            past_key_values = post_process_fn(past_key_values)
+                        
+                        # 注意：attention_mask的拼接已经在外层的if peft_config.peft_type == PeftType.HIDE_PROMPT中处理了
+                        # 这里不需要再拼接，避免重复拼接导致尺寸错误
+                        
+                        # Use past_key_values approach instead of simple concatenation
+                        model_kwargs["past_key_values"] = past_key_values
                     else:
                         # 其他静态 prompt 方法
                         inputs_embeds = self.word_embeddings(model_kwargs["input_ids"])

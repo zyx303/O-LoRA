@@ -517,7 +517,18 @@ class UIETrainer(Seq2SeqTrainer):
         gen_kwargs = self._gen_kwargs
         gen_kwargs["synced_gpus"] = True if is_deepspeed_zero3_enabled() else False
 
-        if "attention_mask" in inputs:
+        # 注意：对于HiDe-Prompt (类似Prefix Tuning)，不应该在gen_kwargs中传递attention_mask
+        # 因为attention_mask会在模型内部根据prefix自动调整
+        # 只有对于非prefix类型的模型才需要传递attention_mask
+        peft_config = getattr(self.model, "peft_config", {})
+        if peft_config and "default" in peft_config:
+            from peft import PeftType
+            peft_type = peft_config["default"].peft_type
+            # 只有非PREFIX_TUNING和非HIDE_PROMPT类型才传递attention_mask
+            if "attention_mask" in inputs and peft_type not in [PeftType.PREFIX_TUNING, PeftType.HIDE_PROMPT]:
+                gen_kwargs["attention_mask"] = inputs.get("attention_mask", None)
+        elif "attention_mask" in inputs:
+            # 如果没有peft_config，默认传递attention_mask（兼容非PEFT模型）
             gen_kwargs["attention_mask"] = inputs.get("attention_mask", None)
 
         generation_config = GenerationConfig(**gen_kwargs)

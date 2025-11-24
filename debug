@@ -1,0 +1,57 @@
+[2025-09-29 17:31:23,906] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2025-09-29 17:31:24,782] [WARNING] [runner.py:196:fetch_hostfile] Unable to find hostfile, will proceed with training with local resources only.
+Detected CUDA_VISIBLE_DEVICES=7: setting --include=localhost:7
+[2025-09-29 17:31:32,344] [INFO] [runner.py:555:main] cmd = /data/yongxi/miniconda3/envs/cl/bin/python3.10 -u -m deepspeed.launcher.launch --world_info=eyJsb2NhbGhvc3QiOiBbN119 --master_addr=127.0.0.1 --master_port=29500 --enable_each_rank_log=None src/run_uie_hide.py --do_train --do_predict --predict_with_generate --model_name_or_path logs_and_outputs/debug/order_1/outputs/1-dbpedia/adapter --data_dir CL_Benchmark --deepspeed configs/ds_configs/stage2.config --task_config_dir configs/order1_configs/amazon --instruction_file configs/instruction_config.json --instruction_strategy single --output_dir logs_and_outputs/debug/order_1/outputs/2-amazon --per_device_train_batch_size 10 --per_device_eval_batch_size 10 --gradient_accumulation_steps 1 --learning_rate 1e-03 --num_train_epochs 1 --run_name order1_round2_hide_prompt --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --evaluation_strategy no --save_strategy no --save_steps 1500 --lamda_1 0.5 --lamda_2 0 --peft_type hide_prompt --max_train_samples 10 --max_eval_samples 10 --max_predict_samples 10
+[2025-09-29 17:31:34,332] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2025-09-29 17:31:35,228] [INFO] [launch.py:145:main] WORLD INFO DICT: {'localhost': [7]}
+[2025-09-29 17:31:35,228] [INFO] [launch.py:151:main] nnodes=1, num_local_procs=1, node_rank=0
+[2025-09-29 17:31:35,228] [INFO] [launch.py:162:main] global_rank_mapping=defaultdict(<class 'list'>, {'localhost': [0]})
+[2025-09-29 17:31:35,228] [INFO] [launch.py:163:main] dist_world_size=1
+[2025-09-29 17:31:35,228] [INFO] [launch.py:165:main] Setting CUDA_VISIBLE_DEVICES=7
+[2025-09-29 17:31:38,525] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2025-09-29 17:31:44,744] [WARNING] [comm.py:152:init_deepspeed_backend] NCCL backend in DeepSpeed not yet implemented
+[2025-09-29 17:31:44,745] [INFO] [comm.py:616:init_distributed] cdb=None
+[2025-09-29 17:31:44,745] [INFO] [comm.py:643:init_distributed] Initializing TorchBackend in DeepSpeed with backend nccl
+09/29/2025 17:31:45 - WARNING - __main__ - Process rank: 0, device: cuda:0, n_gpu: 1distributed training: True, 16-bits training: False
+task_id： 1
+task_name： amazon
+09/29/2025 17:31:45 - WARNING - datasets.builder - Using custom data configuration default-25178e251dd03be0
+09/29/2025 17:31:45 - WARNING - datasets.builder - Reusing dataset uie_instructions (logs_and_outputs/debug/order_1/outputs/2-amazon/f236d5f0073f6b88182545d96de70db6/uie_instructions/default-25178e251dd03be0/2.0.0/c490e7f13dec80785fc335819009163a45c86ae2816040c8d81800108e7e4374)
+len(tokenizer): 32100
+HiDe-Prompt: 恢复 dataset_map，包含 1 个数据集映射: {'dbpedia': 0}
+HiDe-Prompt: 恢复 CR loss 数据，包含 1 个类别统计
+HiDe-Prompt: 准备加载关键模块 base_model.shared.weight
+HiDe-Prompt: 准备加载关键模块 base_model.encoder.embed_tokens.weight
+HiDe-Prompt: 准备加载关键模块 base_model.decoder.embed_tokens.weight
+HiDe-Prompt: 准备加载关键模块 base_model.lm_head.weight
+len(tokenizer): 32100
+HiDe-Prompt: 设置任务ID为 1
+Applying HiDe-Prompt parameter freezing...
+  Trainable: base_model.shared.weight (32870400 params)
+  Trainable: prompt_encoder.default.prompt (9830400 params)
+HiDe-Prompt Parameter Summary:
+  Trainable parameters: 42,700,800
+  Frozen parameters: 704,769,024
+  Trainable percentage: 5.71%
+-----Gradient checkpointing: False -----
+[93m [WARNING] [0m cpu_adam cuda is missing or is incompatible with installed torch, only cpu ops can be compiled!
+ninja: no work to do.
+Time to load cpu_adam op: 9.904967308044434 seconds
+Rank: 0 partition count [1] and sizes[(42700800, False)] 
+Step 0: CR Loss = 0.216179
+{'train_runtime': 4.9088, 'train_samples_per_second': 2.037, 'train_steps_per_second': 0.204, 'train_loss': 7.825488090515137, 'epoch': 1.0}
+HiDe-Prompt: updated e_prompt for task 1 with momentum=0.01
+Computing class statistics for task 1 using 10 features with method 'covariance'
+Task 1 statistics computed. cls_mean keys: [0, 1]
+Starting task adaptive prediction training for task 1
+Starting task adaptive prediction training for task 1
+Task adaptive prediction - Epochs: 5, LR: 0.0001, Trainable params: 1
+Task adaptive prediction - Epoch 1/5
+Generated 50 synthetic samples for 1 previous tasks
+Error in batch 0: 'NoneType' object is not subscriptable
+Model type: <class 'peft.peft_model.PeftModelForSeq2SeqLM'>
+Batch features shape: torch.Size([10, 1024])
+Available model attributes: ['T_destination', 'active_adapter', 'active_peft_config', 'add_adapter', 'add_module', 'apply', 'base_model', 'base_model_prepare_encoder_decoder_kwargs_for_generation', 'base_model_prepare_inputs_for_generation', 'base_model_torch_dtype']
+[2025-09-29 17:36:09,360] [INFO] [launch.py:315:sigkill_handler] Killing subprocess 434810
+[2025-09-29 17:36:09,584] [INFO] [launch.py:315:sigkill_handler] Killing subprocess 434810
+[2025-09-29 17:36:10,321] [INFO] [launch.py:324:sigkill_handler] Main process received SIGINT, exiting

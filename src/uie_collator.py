@@ -203,6 +203,9 @@ class DataCollatorForUIE:
             for k, label_len in enumerate(label_lens):
                 loss_mask[k, : max_len - label_len - 1] = 0
             model_inputs['loss_mask'] = loss_mask.masked_fill(~label_mask, 0)
+            
+            # Add Dataset parameter for HiDe-Prompt
+            model_inputs['Dataset'] = [instance['Dataset'] for instance in batch]
 
             self._save_samples(model_inputs, sources, labels)
 
