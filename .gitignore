@@ -12,3 +12,4 @@ logs_and_outputs/*
 *.pdf
 !readme.md
 !hideprompt.md
+initial_model/*
