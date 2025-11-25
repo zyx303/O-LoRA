@@ -531,6 +531,21 @@ class UIETrainer(Seq2SeqTrainer):
             # 如果没有peft_config，默认传递attention_mask（兼容非PEFT模型）
             gen_kwargs["attention_mask"] = inputs.get("attention_mask", None)
 
+        # 对于decoder模型（如llama），需要显式设置eos_token_id以确保生成正确停止
+        # 这是导致llama生成过长序列的关键问题
+        if check_model(self.model.config._name_or_path, SUPPORTED_DECODER_MODELS):
+            if "eos_token_id" not in gen_kwargs or gen_kwargs["eos_token_id"] is None:
+                if hasattr(self.tokenizer, "eos_token_id") and self.tokenizer.eos_token_id is not None:
+                    gen_kwargs["eos_token_id"] = self.tokenizer.eos_token_id
+                elif hasattr(self.model.config, "eos_token_id") and self.model.config.eos_token_id is not None:
+                    gen_kwargs["eos_token_id"] = self.model.config.eos_token_id
+            # 确保pad_token_id也设置了
+            if "pad_token_id" not in gen_kwargs or gen_kwargs["pad_token_id"] is None:
+                if hasattr(self.tokenizer, "pad_token_id") and self.tokenizer.pad_token_id is not None:
+                    gen_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
+                elif hasattr(self.model.config, "pad_token_id") and self.model.config.pad_token_id is not None:
+                    gen_kwargs["pad_token_id"] = self.model.config.pad_token_id
+
         generation_config = GenerationConfig(**gen_kwargs)
 
         # prepare generation inputs
@@ -551,14 +566,78 @@ class UIETrainer(Seq2SeqTrainer):
             generation_config=generation_config
         )
         
-        # 打印生成的token ID和对应的文本（通过环境变量控制）
-        # print("=== 生成结果 ===")
-        # for i, tokens in enumerate(generated_tokens):
-        #     decoded_text = self.tokenizer.decode(tokens, skip_special_tokens=True)
-        #     print(f"样本 {i}: {decoded_text}")
-        #     # 也打印token IDs
-        #     print(f"Token IDs: {tokens.tolist()}")
-        # print("===============")
+        # # 打印生成的token ID和对应的文本
+        # # 只在预测阶段打印，且限制打印数量避免输出过多
+        # # 检查是否在主进程中（避免分布式训练时重复打印）
+        # print(f"\n=== 生成结果 (Step {self.state.global_step if hasattr(self.state, 'global_step') else 'N/A'}) ===")
+        # # 只打印前3个样本，避免输出过多
+        # num_samples_to_print = min(3, len(generated_tokens))
+        # for i in range(num_samples_to_print):
+        #     # 获取生成的token（转换为列表格式）
+        #     if isinstance(generated_tokens[i], torch.Tensor):
+        #         gen_tokens = generated_tokens[i].cpu().tolist()
+        #     else:
+        #         gen_tokens = list(generated_tokens[i])
+            
+        #     # 解码生成的文本
+        #     is_decoder = check_model(self.model.config._name_or_path, SUPPORTED_DECODER_MODELS)
+
+        #     # 首先解码完整生成的序列
+        #     full_decoded_text = self.tokenizer.decode(gen_tokens, skip_special_tokens=True, clean_up_tokenization_spaces=True)
+
+        #     # 使用 skip_instructions 函数正确处理生成的文本
+        #     # skip_instructions 期望 numpy array，所以需要转换
+        #     import numpy as np
+        #     gen_tokens_array = np.array([gen_tokens])  # 包装成 batch 格式
+        #     processed_predictions = skip_instructions(self.model, gen_tokens_array, self.tokenizer)
+        #     final_prediction = processed_predictions[0] if processed_predictions else ""
+
+        #     # 对于decoder模型，分离输入和生成部分
+        #     if is_decoder:
+        #         # 获取当前样本的输入长度
+        #         if isinstance(generation_inputs, torch.Tensor):
+        #             input_len = generation_inputs[i].shape[0] if len(generation_inputs[i].shape) > 0 else len(generation_inputs[i])
+        #         else:
+        #             input_len = len(generation_inputs[i]) if hasattr(generation_inputs, '__getitem__') and i < len(generation_inputs) else 0
+
+        #         # 解码生成部分
+        #         if input_len < len(gen_tokens):
+        #             generated_part = gen_tokens[input_len:]
+        #             generated_text = self.tokenizer.decode(generated_part, skip_special_tokens=True, clean_up_tokenization_spaces=True)
+        #         else:
+        #             generated_text = ""
+        #     else:
+        #         input_len = 0
+        #         generated_text = full_decoded_text
+
+        #     print(f"\n样本 {i+1}:")
+        #     print(f"  完整生成文本: {full_decoded_text}")
+        #     if is_decoder:
+        #         print(f"  生成部分文本: {generated_text}")
+        #     print(f"  预测结果 (处理后): '{final_prediction}'")
+        #     print(f"  生成长度: {len(gen_tokens)} tokens")
+        #     if is_decoder:
+        #         print(f"  输入长度: {input_len} tokens, 生成部分长度: {len(gen_tokens) - input_len} tokens")
+
+        #     # # 如果有标签，也打印标签用于对比
+        #     # if has_labels and "labels" in inputs:
+        #     #     labels = inputs["labels"][i]
+        #     #     # 过滤掉-100（忽略的token）
+        #     #     valid_labels = labels[labels != -100]
+        #     #     if len(valid_labels) > 0:
+        #     #         label_text = self.tokenizer.decode(valid_labels, skip_special_tokens=True, clean_up_tokenization_spaces=True)
+        #     #         print(f"  标签文本: {label_text}")
+        #     #         print(f"  是否匹配: {final_prediction.strip() == label_text.strip()}")
+
+        #     # 打印token IDs（仅前20个，避免过长）
+        #     if len(gen_tokens) > 20:
+        #         print(f"  Token IDs (前20个): {gen_tokens[:20]}...")
+        #     else:
+        #         print(f"  Token IDs: {gen_tokens}")
+    
+        # if len(generated_tokens) > num_samples_to_print:
+        #     print(f"\n  ... (还有 {len(generated_tokens) - num_samples_to_print} 个样本未显示)")
+        # print("=" * 60)
         # sys.stdout.flush()
 
         bs, source_len = inputs['input_ids'].shape

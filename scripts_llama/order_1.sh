@@ -81,7 +81,6 @@ sleep 5
 
 CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
-   --do_predict \
    --predict_with_generate \
    --model_name_or_path logs_and_outputs_llama/order_1/outputs/2-amazon/adapter \
    --data_dir CL_Benchmark \

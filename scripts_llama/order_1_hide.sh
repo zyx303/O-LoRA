@@ -7,7 +7,7 @@ port=$(shuf -i25000-30000 -n1)
 # export debug=1
 ##################!!!!!!!! bash scripts_llama/order_1_hide.sh > logs_and_outputs_llama/hide/order_1/logs/train_and_infer.log 2>&1
 
-CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_hide.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_hide.py \
    --do_train \
    --do_predict \
    --predict_with_generate \
@@ -17,10 +17,10 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_hide.py \
    --instruction_file configs/instruction_config.json \
    --instruction_strategy single \
    --output_dir logs_and_outputs_llama/hide/order_1/outputs/1-dbpedia \
-   --per_device_train_batch_size 2 \
+   --per_device_train_batch_size 1 \
    --per_device_eval_batch_size 4 \
    --gradient_accumulation_steps 8 \
-   --learning_rate 2e-03 \
+   --learning_rate 1e-03 \
    --num_train_epochs 1 \
    --deepspeed configs/ds_configs/stage2_llama.config \
    --run_name order1_round1 \
@@ -31,8 +31,8 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_hide.py \
    --add_dataset_name True \
    --overwrite_output_dir \
    --overwrite_cache \
-   --lr_scheduler_type cosine \
-   --warmup_ratio 0.05 \
+   --lr_scheduler_type constant \
+   --warmup_steps 0 \
    --logging_strategy steps \
    --logging_steps 10 \
    --evaluation_strategy no \
@@ -40,16 +40,16 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_hide.py \
    --save_steps 1500 \
    --lamda_1 0.5 \
    --lamda_2 0 \
-   --num_virtual_tokens 20 \
+   --num_virtual_tokens 300 \
    --peft_type hide_prompt \
-   --weight_decay 0.01 \
    --dataloader_num_workers 4 \
-   --remove_unused_columns False
+   --remove_unused_columns False 
 
 sleep 5
 
-CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_hide.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_hide.py \
    --do_train \
+   --do_predict \
    --predict_with_generate \
    --model_name_or_path logs_and_outputs_llama/hide/order_1/outputs/1-dbpedia/adapter \
    --data_dir CL_Benchmark \
@@ -57,10 +57,10 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_hide.py \
    --instruction_file configs/instruction_config.json \
    --instruction_strategy single \
    --output_dir logs_and_outputs_llama/hide/order_1/outputs/2-amazon \
-   --per_device_train_batch_size 2 \
+   --per_device_train_batch_size 1 \
    --per_device_eval_batch_size 4 \
    --gradient_accumulation_steps 8 \
-    --learning_rate 2e-03 \
+    --learning_rate 1e-04 \
     --num_train_epochs 1 \
     --deepspeed configs/ds_configs/stage2_llama.config \
     --run_name order1_round2 \
@@ -71,8 +71,8 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_hide.py \
     --add_dataset_name True \
     --overwrite_output_dir \
     --overwrite_cache \
-    --lr_scheduler_type cosine \
-    --warmup_ratio 0.03 \
+    --lr_scheduler_type constant \
+    --warmup_steps 0 \
     --logging_strategy steps \
     --logging_steps 10 \
     --evaluation_strategy no \
@@ -80,16 +80,18 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_hide.py \
     --save_steps 1500 \
     --lamda_1 0.5 \
     --lamda_2 0 \
-    --num_virtual_tokens 20 \
+    --num_virtual_tokens 50 \
     --peft_type hide_prompt \
     --weight_decay 0.01 \
     --dataloader_num_workers 4 \
-    --remove_unused_columns False
+    --remove_unused_columns False 
+
 
 sleep 5
 
-CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_hide.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_hide.py \
    --do_train \
+   --do_predict \
    --predict_with_generate \
    --model_name_or_path logs_and_outputs_llama/hide/order_1/outputs/2-amazon/adapter \
    --data_dir CL_Benchmark \
@@ -97,10 +99,10 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_hide.py \
    --instruction_file configs/instruction_config.json \
    --instruction_strategy single \
    --output_dir logs_and_outputs_llama/hide/order_1/outputs/3-yahoo \
-   --per_device_train_batch_size 2 \
+   --per_device_train_batch_size 1 \
    --per_device_eval_batch_size 4 \
    --gradient_accumulation_steps 8 \
-    --learning_rate 2e-03 \
+    --learning_rate 1e-04 \
     --num_train_epochs 1 \
     --deepspeed configs/ds_configs/stage2_llama.config \
     --run_name order1_round3 \
@@ -111,8 +113,8 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_hide.py \
     --add_dataset_name True \
     --overwrite_output_dir \
     --overwrite_cache \
-    --lr_scheduler_type cosine \
-    --warmup_ratio 0.02 \
+    --lr_scheduler_type constant \
+    --warmup_steps 0 \
     --logging_strategy steps \
     --logging_steps 10 \
     --evaluation_strategy no \
@@ -120,7 +122,7 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_hide.py \
     --save_steps 1500 \
     --lamda_1 0.5 \
     --lamda_2 0 \
-    --num_virtual_tokens 20 \
+    --num_virtual_tokens 50 \
     --peft_type hide_prompt \
     --weight_decay 0.01 \
     --dataloader_num_workers 4 \
@@ -128,7 +130,7 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_hide.py \
 
 sleep 5
 
-CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_hide.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 deepspeed --master_port $port src/run_uie_hide.py \
    --do_train \
    --do_predict \
    --predict_with_generate \
@@ -138,10 +140,10 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_hide.py \
    --instruction_file configs/instruction_config.json \
    --instruction_strategy single \
    --output_dir logs_and_outputs_llama/hide/order_1/outputs/4-agnews \
-   --per_device_train_batch_size 2 \
+   --per_device_train_batch_size 1 \
    --per_device_eval_batch_size 4 \
    --gradient_accumulation_steps 8 \
-    --learning_rate 2e-03 \
+    --learning_rate 1e-04 \
     --num_train_epochs 1 \
     --deepspeed configs/ds_configs/stage2_llama.config \
     --run_name order1_round4 \
@@ -152,8 +154,8 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_hide.py \
     --add_dataset_name True \
     --overwrite_output_dir \
     --overwrite_cache \
-    --lr_scheduler_type cosine \
-    --warmup_ratio 0.02 \
+    --lr_scheduler_type constant \
+    --warmup_steps 0 \
     --logging_strategy steps \
     --logging_steps 10 \
     --evaluation_strategy no \
@@ -161,7 +163,7 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_hide.py \
     --save_steps 1500 \
     --lamda_1 0.5 \
     --lamda_2 0 \
-    --num_virtual_tokens 20 \
+    --num_virtual_tokens 50 \
     --peft_type hide_prompt \
     --weight_decay 0.01 \
     --dataloader_num_workers 4 \
