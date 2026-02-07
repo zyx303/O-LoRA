@@ -1,4 +1,5 @@
 import torch
+import os
 from transformers import GenerationConfig
 from transformers.trainer_seq2seq import Seq2SeqTrainer
 from transformers.trainer import *
@@ -7,8 +8,86 @@ from transformers.trainer_callback import TrainerCallback
 from uie_collator import SUPPORTED_DECODER_MODELS, check_model
 from uie_dataset_lora import ANSWER_PREFIX
 from peft.tuners.inflora import LoraLayer as InfLoraLayer
-
+import sys
 from peft import PeftType
+
+
+def check_prompt_gradients(model, step=0, log_details=False):
+    """检查prompt梯度回传是否正常"""
+    prompt_params = {}
+    for name, param in model.named_parameters():
+        # print(name)
+        if param.requires_grad:
+            print(f'{name} requires grad')
+            # if any(kw in name.lower() for kw in ['prompt', 'hide_prompt', 'e_prompt']):
+            if param.grad is not None:
+                grad_norm = param.grad.norm().item()
+                prompt_params[name] = grad_norm
+                if log_details:
+                    print(f"Step {step} - {name}: grad_norm={grad_norm:.6f}")
+            else:
+                prompt_params[name] = 0.0
+                if log_details:
+                    print(f"Step {step} - {name}: No gradient!")
+    
+    if prompt_params:
+        total_norm = sum(prompt_params.values())
+        if log_details:
+            print(f"Step {step} - Total prompt grad norm: {total_norm:.6f}")
+        sys.stdout.flush()
+        return total_norm > 1e-8  # 梯度是否正常
+    # 刷新std
+    return True
+
+
+# 全局变量用于存储类别统计
+global cls_mean
+global cls_cov
+global features_all
+cls_mean = dict()
+cls_cov = dict()
+features_all = []  # 用于存储所有batch的特征表示
+
+
+def orth_loss(features, targets=None, device=None, args=None):
+    """
+    HiDe-Prompt风格的正交损失 (Orthogonal Loss)
+    
+    Args:
+        features: 模型输出的特征表示 [batch_size, feature_dim]
+        targets: 目标标签 (未使用，保持接口一致)
+        device: 设备
+        args: 训练参数，包含reg系数
+        
+    Returns:
+        torch.Tensor: 正交损失值
+    """
+    if features is None or features.size(0) == 0:
+        return torch.tensor(0.0, device=device, requires_grad=True)
+    
+    reg_coeff = getattr(args, 'reg', 0.1) if args else 0.1
+    temperature = 0.8  # 固定温度系数，与HiDe-Prompt保持一致
+    
+    if cls_mean:
+        # 使用已存储的类别均值
+        sample_mean = []
+        for k, v in cls_mean.items():
+            if isinstance(v, list):
+                sample_mean.extend(v)
+            else:
+                sample_mean.append(v)
+        
+        if sample_mean:
+            sample_mean = torch.stack(sample_mean, dim=0).to(device, non_blocking=True)
+            M = torch.cat([sample_mean, features], dim=0)
+            sim = torch.matmul(M, M.t()) / temperature
+            loss = torch.nn.functional.cross_entropy(sim, torch.arange(sim.shape[0], device=device, dtype=torch.long))
+            return reg_coeff * loss
+    
+    # 如果没有类别统计，使用当前batch的特征
+    sim = torch.matmul(features, features.t()) / temperature
+    loss = torch.nn.functional.cross_entropy(sim, torch.arange(features.size(0), device=device, dtype=torch.long))
+    return reg_coeff * loss
 
 
 def skip_instructions(model, predictions_ids, tokenizer, ignore_idx=-100):
@@ -54,7 +133,54 @@ class DenserEvalCallback(TrainerCallback):
 
 
 class UIETrainer(Seq2SeqTrainer):
-
+    
+    def _extract_features(self, outputs, inputs=None):
+        """从模型输出中提取特征用于CR loss计算"""
+        if hasattr(outputs, 'hidden_states') and outputs.hidden_states is not None:
+            return outputs.hidden_states[-1].mean(dim=1)
+        elif hasattr(outputs, 'encoder_last_hidden_state') and outputs.encoder_last_hidden_state is not None:
+            return outputs.encoder_last_hidden_state.mean(dim=1)
+        elif isinstance(outputs, dict):
+            if 'hidden_states' in outputs and outputs['hidden_states'] is not None:
+                return outputs['hidden_states'][-1].mean(dim=1)
+            elif 'encoder_last_hidden_state' in outputs and outputs['encoder_last_hidden_state'] is not None:
+                return outputs['encoder_last_hidden_state'].mean(dim=1)
+        return None
+    
+    # def create_optimizer(self):
+    #     """创建具有不同参数组学习率的优化器"""
+    #     if self.optimizer is None:
+    #         historical_scaling_params = []
+    #         other_params = []
+            
+    #         for name, param in self.model.named_parameters():
+    #             if param.requires_grad:
+    #                 if "historical_scalings" in name:
+    #                     historical_scaling_params.append(param)
+    #                 else:
+    #                     other_params.append(param)
+            
+    #         # 创建参数组
+    #         optimizer_grouped_parameters = []
+            
+    #         if other_params:
+    #             optimizer_grouped_parameters.append({
+    #                 'params': other_params,
+    #                 'lr': self.args.learning_rate,  # 使用默认学习率
+    #                 'weight_decay': self.args.weight_decay,
+    #             })
+            
+    #         if historical_scaling_params:
+    #             optimizer_grouped_parameters.append({
+    #                 'params': historical_scaling_params, 
+    #                 'lr': self.args.learning_rate * 10.0,  # 10倍学习率
+    #                 'weight_decay': self.args.weight_decay,
+    #             })
+            
+    #         # 让 DeepSpeed 处理优化器创建
+    #         return None  # 返回 None 让 DeepSpeed 自己创建
+        
+    #     return self.optimizer
 
     def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
         """
@@ -74,25 +200,24 @@ class UIETrainer(Seq2SeqTrainer):
         Return:
             `torch.Tensor`: The tensor with training loss on this batch.
         """
-        model.train()
         inputs = self._prepare_inputs(inputs)
+
+        
+        if (getattr(self.args, "get_cur_feat", False) or getattr(self.args, "get_feat", False)) and getattr(model, "peft_type", "").upper() == "INFLORA":
+            model.eval()
+            with torch.no_grad():
+                _ = model(**inputs)  # get matrix
+            return torch.zeros([], device=self.args.device, dtype=torch.float32)
+        model.train()
 
         if is_sagemaker_mp_enabled():
             loss_mb = smp_forward_backward(model, inputs, self.args.gradient_accumulation_steps)
             return loss_mb.reduce_mean().detach().to(self.args.device)
-        if (getattr(self.args, "get_cur_feat", False) or getattr(self.args, "get_feat", False)) and getattr(self.args, "peft_type", "").upper() == "INFLORA":
-            model.eval()
-            base = self.model.module if hasattr(self.model, "module") else self.model
-            for m in base.modules():
-                if isinstance(m, InfLoraLayer) :
-                    m.get_feat = getattr(self.args, "get_feat", False)
-                    m.get_cur_feat = getattr(self.args, "get_cur_feat", False)
-                    # print(f"Set {name} get_feat to {module.get_feat}, get_cur_feat to {module.get_cur_feat}")
-            with torch.no_grad():
-                _ = model(**inputs)  # get matrix
-            return torch.zeros([], device=self.args.device, dtype=torch.float32)
+        
         
         with self.compute_loss_context_manager():
+            if 'Dataset' in inputs and getattr(model, "peft_type", "").upper() != "HIDE_PROMPT":
+                inputs.pop("Dataset")
             loss,outputs = self.compute_loss(model, inputs,return_outputs=True)
 
         if self.args.n_gpu > 1:
@@ -106,6 +231,22 @@ class UIETrainer(Seq2SeqTrainer):
         if 'reduce_sim' in outputs:
             l2p_loss = outputs['reduce_sim']
             loss -= l2p_loss * self.args.pull_constraint_coeff
+
+        ####################### CR loss (HiDe-Prompt style) #######################
+
+        
+        if getattr(model, "peft_type", "").upper() == "HIDE_PROMPT":
+            features = self._extract_features(outputs, inputs) # [B,d] t5:d=1024
+            ## 更新features_all  
+            features_all.append(features)
+            if features is not None:
+                cr_loss_val = orth_loss(features, None, self.args.device, self.args)
+                loss += cr_loss_val
+                
+                # 记录CR loss
+                if self.state.global_step % 10 == 0:
+                    print(f"Step {self.state.global_step}: CR Loss = {cr_loss_val.item():.6f}")
+                    sys.stdout.flush()
 
         ########################### Regularization ##########################
         
@@ -130,7 +271,7 @@ class UIETrainer(Seq2SeqTrainer):
             lamda_2 = self.args.lamda_2
 
             # print(f"orthogonal_loss: {orthogonal_loss.item()}; l2_loss: {l2_loss.item()}; accuracy_loss: {loss.item()}; λ1: {lamda_1}; λ2: {lamda_2}")
-            logger.info(f"orthogonal_loss: {orthogonal_loss.item()}; l2_loss: {l2_loss.item()}; accuracy_loss: {loss.item()}; λ1: {lamda_1}; λ2: {lamda_2}")
+            # logger.info(f"orthogonal_loss: {orthogonal_loss.item()}; l2_loss: {l2_loss.item()}; accuracy_loss: {loss.item()}; λ1: {lamda_1}; λ2: {lamda_2}")
             loss = loss + orthogonal_loss * lamda_1 + l2_loss * lamda_2
         ######################################################################
 
@@ -145,6 +286,23 @@ class UIETrainer(Seq2SeqTrainer):
         else:
             loss.backward()
 
+        # # 检查historical_scalings的梯度
+        # for name, param in model.named_parameters():
+        #     if param.requires_grad:
+        #         print(f"Parameter: {name}, Requires Grad: {param.requires_grad}, Grad Norm: {param.grad.norm() if param.grad is not None else 'No Grad'}")
+        
+        # print("=== Checking historical_scalings initialization ===")
+        # for name, param in model.named_parameters():
+        #     if "module.base_model.model.encoder.block.0.layer.0.SelfAttention.q.historical_scalings.default" in name or 'module.base_model.model.encoder.block.0.layer.0.SelfAttention.q.loranew_A' in name:
+        #         print(f"Parameter: {name}")
+        #         print(f"  Shape: {param.shape}")
+        #         print(f"  Value: {param.data}")
+        #         print(f"  Requires grad: {param.requires_grad}")
+        #         print(f"  Device: {param.device}")
+        #         print(f"  Dtype: {param.dtype}")
+        # 检查prompt梯度回传
+        # if self.state.global_step % 50 == 0 or self.state.global_step < 10:
+        #     check_prompt_gradients(model, self.state.global_step, log_details=True)
         return loss.detach()
 
 
@@ -372,12 +530,25 @@ class UIETrainer(Seq2SeqTrainer):
         else:
             generation_inputs = inputs[self.model.main_input_name]
 
-        # 为HiDe-Prompt在生成时添加task_id信息  
-        # 注意：不能直接传递prompt_idx给generate，需要通过forward过程处理
+        # 为HiDe-Prompt在生成时添加dataset信息用于prompt选择
+        # 通过临时设置模型属性来传递Dataset信息
+        if "Dataset" in inputs:
+            self.model._current_datasets = inputs["Dataset"]
+            
         generated_tokens = self.model.generate(
             input_ids=generation_inputs, 
             generation_config=generation_config
         )
+        
+        # 打印生成的token ID和对应的文本（通过环境变量控制）
+        # print("=== 生成结果 ===")
+        # for i, tokens in enumerate(generated_tokens):
+        #     decoded_text = self.tokenizer.decode(tokens, skip_special_tokens=True)
+        #     print(f"样本 {i}: {decoded_text}")
+        #     # 也打印token IDs
+        #     print(f"Token IDs: {tokens.tolist()}")
+        # print("===============")
+        # sys.stdout.flush()
 
         bs, source_len = inputs['input_ids'].shape
         # in case the batch is shorter than max length, the output should be padded

@@ -46,7 +46,7 @@ from transformers import (
     set_seed, )
 from transformers.file_utils import is_offline_mode
 from transformers.trainer_utils import get_last_checkpoint
-from peft import get_peft_config, get_peft_model, LoraConfig, TaskType, PeftModel, PeftConfig,PrefixTuningConfig  # add
+from peft import get_peft_config, get_peft_model, LoraConfig, TaskType, PeftModel, PeftConfig  # add
 from peft import SDLoraConfig  # new
 from peft import L2PConfig  # new
 from peft import PeftType  # new
@@ -60,9 +60,10 @@ from peft.utils.save_and_load import (
 from uie_collator import DataCollatorForUIE
 from uie_dataset_lora import gen_cache_path
 
-from uie_trainer_lora import UIETrainer, DenserEvalCallback, skip_instructions
+from uie_trainer_lora import UIETrainer, DenserEvalCallback, skip_instructions, cls_mean, cls_cov, features_all
 from compute_metrics import compute_metrics, compute_grouped_metrics
 from model.llama import LlamaForCausalLM_with_lossmask
+
 
 # off wandb
 os.environ['WANDB_DISABLED'] = "True"
@@ -260,7 +261,7 @@ class UIETrainingArguments(Seq2SeqTrainingArguments):
     lamda_2: float = field(default = 0)
     regularization: bool = field(default=False)
     # L2P continual learning parameters
-    pool_size: int = field(default=50, metadata={"help": "Size of the L2P prompt pool"})
+    pool_size: int = field(default=10, metadata={"help": "Size of the L2P prompt pool"})
     l2p_top_k: int = field(default=5, metadata={"help": "Number of top prompts to select in L2P"})
     l2p_task_id: Optional[int] = field(default=None, metadata={"help": "Current task ID for L2P continual learning"})
     l2p_num_classes: Optional[int] = field(default=None, metadata={"help": "Number of classes in current task"})
@@ -271,9 +272,289 @@ class UIETrainingArguments(Seq2SeqTrainingArguments):
     logging_steps: int = field(default=10)
     # HiDe-Prompt continual learning parameters
     hide_task_id: Optional[int] = field(default=None, metadata={"help": "Current task ID for HiDe-Prompt CL"})
-    prompt_momentum: float = field(default=0.0, metadata={"help": "Momentum for post-task HiDe prompt update [0-1]"})
+    prompt_momentum: float = field(default=0.01, metadata={"help": "Momentum for post-task HiDe prompt update [0-1]"})
+    # Task adaptive prediction parameters
+    not_train_ca: bool = field(default=False, metadata={"help": "Whether to skip task adaptive prediction training"})
+    crct_epochs: int = field(default=5, metadata={"help": "Number of epochs for task adaptive prediction training"})
+    ca_lr: float = field(default=1e-4, metadata={"help": "Learning rate for task adaptive prediction training"})
+    ca_storage_efficient_method: str = field(default="covariance", metadata={"help": "Method for storing class statistics: covariance, variance, or multi-centroid"})
+    n_centroids: int = field(default=5, metadata={"help": "Number of centroids for multi-centroid method"})
 
+@torch.no_grad()
+def _compute_mean(model: torch.nn.Module, device: torch.device, task_id,
+                  args=None, method='covariance'):
+    """
+    计算当前任务的类别统计信息，使用trainer中已收集的features_all
+    
+    Args:
+        model: 模型（未使用，保持接口一致）
+        device: 计算设备
+        task_id: 任务ID
+        args: 训练参数
+        method: 统计方法 ('covariance', 'variance', 'multi-centroid')
+    """
+    # # 只在rank 0进程上计算
+    # if args.world_size > 1 and args.local_rank != 0:
+    #     return
+    if not features_all:
+        print(f"Warning: features_all is empty for task {task_id}")
+        return
+    
+    # 合并所有收集的特征
+    features_per_cls = torch.cat([f for f in features_all if f is not None], dim=0)
+    
+    # 分布式训练：收集所有进程的特征
+    if args.world_size > 1:
+        features_per_cls_list = [torch.zeros_like(features_per_cls, device=device) for _ in range(args.world_size)]
+        torch.distributed.barrier()
+        torch.distributed.all_gather(features_per_cls_list, features_per_cls)
+        features_per_cls = torch.cat(features_per_cls_list, dim=0)
+    
+    print(f"Computing class statistics for task {task_id} using {features_per_cls.shape[0]} features with method '{method}'")
+    
+    if method == 'covariance':
+        cls_mean[task_id] = features_per_cls.mean(dim=0)
+        # TODO 
+        # cls_cov[task_id] = torch.cov(features_per_cls.T) + (torch.eye(cls_mean[task_id].shape[-1]) * 1e-4).to(device)
+        
+    elif method == 'variance':
+        cls_mean[task_id] = features_per_cls.mean(dim=0)
+        cls_cov[task_id] = torch.diag(torch.cov(features_per_cls.T) + (torch.eye(cls_mean[task_id].shape[-1]) * 1e-4).to(device))
+        
+    elif method == 'multi-centroid':
+        import numpy as np
+        from sklearn.cluster import KMeans
+        
+        n_clusters = args.n_centroids
+        features_numpy = features_per_cls.cpu().numpy()
+        
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        kmeans.fit(features_numpy)
+        cluster_labels = kmeans.labels_
+        
+        cluster_means = []
+        cluster_vars = []
+        
+        for i in range(n_clusters):
+            cluster_mask = (cluster_labels == i)
+            if np.sum(cluster_mask) > 0:  # 确保簇不为空
+                cluster_data = features_numpy[cluster_mask]
+                cluster_mean = torch.tensor(np.mean(cluster_data, axis=0), dtype=torch.float32).to(device)
+                cluster_var = torch.tensor(np.var(cluster_data, axis=0), dtype=torch.float32).to(device)
+                cluster_means.append(cluster_mean)
+                cluster_vars.append(cluster_var)
+        
+        cls_mean[task_id] = cluster_means
+        cls_cov[task_id] = cluster_vars
+        
+    print(f"Task {task_id} statistics computed. cls_mean keys: {list(cls_mean.keys())}")
+    
+    # 清空features_all为下一个任务准备
+    features_all.clear()
 
+def train_task_adaptive_prediction(model, tokenizer, args, device, task_id=-1, method='covariance'):
+    """
+    HiDe-Prompt版本的任务自适应预测训练
+    
+    Args:
+        model: HiDe-Prompt模型
+        tokenizer: 分词器 
+        args: 训练参数
+        device: 计算设备
+        task_id: 当前任务ID
+        method: 统计方法 ('covariance', 'variance', 'multi-centroid')
+    """
+    # 只在rank 0进程上执行
+    if args.world_size > 1 and args.local_rank != 0:
+        return
+        
+    if not cls_mean or task_id == 0:
+        print(f"Skipping task adaptive prediction for task {task_id} (no previous tasks or missing statistics)")
+        return
+    
+    print(f"Starting task adaptive prediction training for task {task_id}")
+    
+    model.train()
+    
+    # 训练参数设置
+    run_epochs = args.crct_epochs
+    ca_lr = args.ca_lr
+    batch_size = args.per_device_train_batch_size
+    num_sampled_per_task = batch_size * 5  # 每个任务采样的数据量
+    
+    # 获取可训练参数（排除HiDe-Prompt相关参数，只训练分类头）
+    param_list = []
+    for name, param in model.named_parameters():
+        if param.requires_grad and not any(key in name for key in ["prompt", "prompt_key"]):
+            param_list.append(param)
+    
+    if not param_list:
+        print("No trainable parameters found for task adaptive prediction")
+        return
+    
+    # 设置优化器和调度器
+    network_params = [{'params': param_list, 'lr': ca_lr, 'weight_decay': args.weight_decay}]
+    optimizer = torch.optim.AdamW(network_params, lr=ca_lr, weight_decay=args.weight_decay)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=run_epochs)
+    criterion = torch.nn.CrossEntropyLoss().to(device)
+    
+    print(f"Task adaptive prediction - Epochs: {run_epochs}, LR: {ca_lr}, Trainable params: {len(param_list)}")
+    
+    for epoch in range(run_epochs):
+        print(f"Task adaptive prediction - Epoch {epoch + 1}/{run_epochs}")
+        
+        # 为每个之前的任务生成合成数据
+        all_sampled_features = []
+        all_sampled_labels = []
+        
+        for prev_task_id in range(task_id):
+            if prev_task_id not in cls_mean:
+                continue
+                
+            if method in ['covariance', 'variance']:
+                mean = cls_mean[prev_task_id][0]
+                cov = cls_cov[prev_task_id][0]
+                
+                if method == 'variance':
+                    cov = torch.diag(cov)
+                
+                from torch.distributions.multivariate_normal import MultivariateNormal
+                m = MultivariateNormal(mean.float(), cov.float())
+                sampled_features = m.sample(sample_shape=(num_sampled_per_task,))
+                
+                all_sampled_features.append(sampled_features)
+                all_sampled_labels.extend([prev_task_id] * num_sampled_per_task)
+                    
+            elif method == 'multi-centroid':
+                cluster_means = cls_mean[prev_task_id][0]   
+                cluster_vars = cls_cov[prev_task_id][0]
+                
+                for cluster_idx, (cluster_mean, cluster_var) in enumerate(zip(cluster_means, cluster_vars)):
+                    if cluster_var.mean() == 0:
+                        continue
+                        
+                    try:
+                        cov_matrix = torch.diag(cluster_var) + 1e-4 * torch.eye(cluster_mean.shape[0]).to(cluster_mean.device)
+                        m = MultivariateNormal(cluster_mean.float(), cov_matrix.float())
+                        sampled_features = m.sample(sample_shape=(num_sampled_per_task // len(cluster_means),))
+                        
+                        all_sampled_features.append(sampled_features)
+                        all_sampled_labels.extend([prev_task_id] * (num_sampled_per_task // len(cluster_means)))
+                        
+                    except Exception as e:
+                        print(f"Error sampling cluster {cluster_idx} for task {prev_task_id}: {e}")
+                        continue
+        
+        if not all_sampled_features:
+            print(f"No valid sampled features for epoch {epoch}, skipping")
+            continue
+            
+        # 合并所有采样的特征
+        sampled_features = torch.cat(all_sampled_features, dim=0).float().to(device)
+        sampled_labels = torch.tensor(all_sampled_labels).long().to(device)
+        
+        # 随机打乱数据
+        shuffle_indices = torch.randperm(sampled_features.size(0))
+        sampled_features = sampled_features[shuffle_indices]
+        sampled_labels = sampled_labels[shuffle_indices]
+        
+        print(f"Generated {sampled_features.shape[0]} synthetic samples for {len(set(all_sampled_labels))} previous tasks")
+        
+        # 分批训练
+        num_batches = (sampled_features.size(0) + batch_size - 1) // batch_size
+        epoch_loss = 0.0
+        epoch_acc = 0.0
+        
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min((batch_idx + 1) * batch_size, sampled_features.size(0))
+            
+            batch_features = sampled_features[start_idx:end_idx]
+            batch_labels = sampled_labels[start_idx:end_idx]
+            
+            # 使用模型的forward方法，但只计算logits
+            try:
+                # 这里我们直接使用特征通过模型的分类头或语言建模头
+                
+                # 首先尝试直接使用features作为hidden states
+                if hasattr(model, 'base_model') and hasattr(model.base_model, 'lm_head'):
+                    # 对于因果语言模型，直接通过lm_head
+                    logits = model.base_model.lm_head(batch_features)
+                elif hasattr(model, 'lm_head'):
+                    # 直接通过lm_head
+                    logits = model.lm_head(batch_features)
+                elif hasattr(model, 'classifier'):
+                    # 对于分类模型
+                    logits = model.classifier(batch_features)
+                # else:
+                #     # 尝试使用inputs_embeds方式
+                #     # 为每个特征创建一个假的token序列
+                #     batch_size = batch_features.size(0)
+                #     seq_len = 1  # 使用单个token
+                #     inputs_embeds = batch_features.unsqueeze(1)  # [batch_size, 1, hidden_size]
+                    
+                #     # 创建attention mask
+                #     attention_mask = torch.ones(batch_size, seq_len, device=device)
+                    
+                #     outputs = model(
+                #         inputs_embeds=inputs_embeds,
+                #         attention_mask=attention_mask,
+                #         return_dict=True
+                #     )
+                #     logits = outputs.logits
+                    
+                #     # 取最后一个token的logits
+                #     if logits.dim() == 3:  # [batch_size, seq_len, vocab_size]
+                #         logits = logits[:, -1, :]  # 取最后一个token
+                
+                # 确保logits维度正确
+                if logits.dim() > 2:
+                    logits = logits.view(-1, logits.size(-1))
+                
+                # 如果logits的词汇表大小与任务数不匹配，我们需要映射,TODO 不合理
+                num_tasks = max(all_sampled_labels) + 1
+                if logits.size(-1) != num_tasks:
+                    # 使用简单的线性变换映射到正确的任务数
+                    # 这里我们只使用logits的前num_tasks个维度，或者进行平均池化
+                    if logits.size(-1) > num_tasks:
+                        # 如果logits维度大于任务数，取前num_tasks个
+                        logits = logits[:, :num_tasks]
+                    else:
+                        # 如果logits维度小于任务数，重复填充或使用线性层
+                        # 为了简单起见，我们使用平均值来填充缺失的维度
+                        padding_size = num_tasks - logits.size(-1)
+                        padding = torch.mean(logits, dim=-1, keepdim=True).repeat(1, padding_size)
+                        logits = torch.cat([logits, padding], dim=-1)
+                
+                loss = criterion(logits, batch_labels)
+                
+                # 计算准确率
+                pred = torch.argmax(logits, dim=-1)
+                acc = (pred == batch_labels).float().mean()
+                
+                # 反向传播
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                
+                epoch_loss += loss.item()
+                epoch_acc += acc.item()
+                
+            except Exception as e:
+                print(f"Error in batch {batch_idx}: {e}")
+                print(f"Model type: {type(model)}")
+                print(f"Batch features shape: {batch_features.shape}")
+                print(f"Available model attributes: {[attr for attr in dir(model) if not attr.startswith('_')][:10]}")
+                continue
+        
+        avg_loss = epoch_loss / num_batches if num_batches > 0 else 0.0
+        avg_acc = epoch_acc / num_batches if num_batches > 0 else 0.0
+        
+        print(f"Epoch {epoch + 1} - Loss: {avg_loss:.4f}, Acc: {avg_acc:.4f}, LR: {optimizer.param_groups[0]['lr']:.6f}")
+        
+        scheduler.step()
+    
+    print(f"Task adaptive prediction training completed for task {task_id}")
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -312,8 +593,12 @@ def main():
     # get task id 
     import re, os
     m = re.match(r"^(\d+)-", os.path.basename(os.path.normpath(training_args.output_dir)))
-    task_id = int(m.group(1)) if m else None
+    task_id = int(m.group(1)) - 1 if m else None
     print('task_id：', task_id)
+
+    m_name = re.match(r"^\d+-(.*)", os.path.basename(os.path.normpath(training_args.output_dir)))
+    task_name = m_name.group(1) if m_name else None
+    print('task_name：', task_name)
 
     # Detecting last checkpoint.
     last_checkpoint = None
@@ -405,9 +690,12 @@ def main():
         tokenizer.padding_side = 'left'
     else: 
         model_class = AutoModelForSeq2SeqLM
-
+        
     if 'adapter' in model_args.model_name_or_path: # add lora-adapter to the original model
         model = model_class.from_pretrained(config.base_model_name_or_path)
+        # 先调整token embeddings大小，再加载adapter
+        model.resize_token_embeddings(len(tokenizer))
+        print(f"len(tokenizer): {len(tokenizer)}")
         model = PeftModel.from_pretrained(model, model_args.model_name_or_path)
     elif 'llama' in model_args.model_name_or_path.lower():
         model = model_class.from_pretrained(
@@ -418,27 +706,15 @@ def main():
             revision=model_args.model_revision,
             use_auth_token=True if model_args.use_auth_token else None
         )
-        if model_args.peft_type.upper() == "SDLORA":
-            peft_config = SDLoraConfig(
-                task_type=TaskType.CAUSAL_LM,
-                inference_mode=False,
-                r=model_args.lora_dim,
-                lora_alpha=32,
-                lora_dropout=0.1,
-                save_loranew=True,
-            )
-        elif model_args.peft_type.upper() == "INFLORA":
-            peft_config = InfLoRAConfig(
-                task_type=TaskType.CAUSAL_LM,
-                inference_mode=False,
-                r=model_args.lora_dim,
-                lora_alpha=32,
-                lora_dropout=0.1
-            )
-        else:
-            peft_config = LoraConfig(
-                task_type=TaskType.CAUSAL_LM, inference_mode=False, r=model_args.lora_dim, lora_alpha=32, lora_dropout=0.1
-            )
+        print(f"Using HiDe-Prompt with {model_args.num_virtual_tokens} virtual tokens.")
+        peft_config = HidePromptConfig(
+            num_virtual_tokens=model_args.num_virtual_tokens,
+            task_type=TaskType.SEQ_2_SEQ_LM,
+            inference_mode=False,
+            prompt_key=False,
+            pool_size=10,  # 明确设置prompt pool大小
+            top_k=1
+        )
         model = get_peft_model(model, peft_config)
     else:
         model = model_class.from_pretrained(
@@ -449,59 +725,22 @@ def main():
             revision=model_args.model_revision,
             use_auth_token=True if model_args.use_auth_token else None,
         )
-        if model_args.peft_type.upper() == "SDLORA":
-            peft_config = SDLoraConfig(
-                task_type=TaskType.SEQ_2_SEQ_LM,
-                inference_mode=False,
-                r=model_args.lora_dim,
-                lora_alpha=32,
-                lora_dropout=0.1,
-                save_loranew=True,
-            )
-        elif model_args.peft_type.upper() == "L2P":
-            print(f"Using L2P with {model_args.num_virtual_tokens} virtual tokens.")
-            peft_config = L2PConfig(
-                num_virtual_tokens=model_args.num_virtual_tokens,
-                task_type=TaskType.SEQ_2_SEQ_LM,
-                inference_mode=False,
-                pool_size=training_args.pool_size,
-                top_k=training_args.l2p_top_k,
-                pull_constraint=training_args.pull_constraint,
-                pull_constraint_coeff=training_args.pull_constraint_coeff,
-                engine=model_args.l2p_engine,
-            )
-        elif model_args.peft_type.upper() == "HIDE_PROMPT":
-            print(f"Using HiDe-Prompt with {model_args.num_virtual_tokens} virtual tokens.")
-            peft_config = HidePromptConfig(
-                num_virtual_tokens=model_args.num_virtual_tokens,
-                task_type=TaskType.SEQ_2_SEQ_LM,
-                inference_mode=False,
-                prompt_key=False,
-                pool_size=100,  # 明确设置prompt pool大小
-                top_k=1       # 明确设置top_k
-            )
-        elif model_args.peft_type.upper() == "INFLORA":
-            peft_config = InfLoRAConfig(
-                task_type=TaskType.SEQ_2_SEQ_LM,
-                inference_mode=False,
-                r=model_args.lora_dim,
-                lora_alpha=32,
-                lora_dropout=0.1
-            )
-        else:
-            # peft_config = LoraConfig(
-            #     task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=model_args.lora_dim, lora_alpha=32, lora_dropout=0.1
-            # )
-            peft_config = PrefixTuningConfig(
-                peft_type="PREFIX_TUNING",
-                task_type="SEQ_2_SEQ_LM",
-                num_virtual_tokens=20
-            )
+        print(f"Using HiDe-Prompt with {model_args.num_virtual_tokens} virtual tokens.")
+        peft_config = HidePromptConfig(
+            num_virtual_tokens=model_args.num_virtual_tokens,
+            task_type=TaskType.SEQ_2_SEQ_LM,
+            inference_mode=False,
+            prompt_key=False,
+            pool_size=10,  # 明确设置prompt pool大小
+            top_k=1
+        )
         model = get_peft_model(model, peft_config)
         with open(os.path.join(training_args.output_dir, "config.json"), "w") as f:
             json.dump(training_args.to_dict(), f, indent=4)
-    model.resize_token_embeddings(len(tokenizer))
-
+        # 对于新训练的模型，也需要调整token embeddings大小
+        model.resize_token_embeddings(len(tokenizer))
+    # 注意：对于从adapter加载的模型，resize_token_embeddings已经在加载前执行了
+    print(f"len(tokenizer): {len(tokenizer)}")
     # If using HiDe-Prompt, set task_id based on continual learning order
     # try:
     #     if model_args.peft_type.upper() == "HIDE_PROMPT":
@@ -518,7 +757,7 @@ def main():
     #             else:
     #                 logger.info(f"Auto-determined task_id from config '{data_args.task_config_dir}': {task_id}")
             
-    #         set_hide_prompt_task_id(model, task_id)
+    set_hide_prompt_task_id(model, task_id)
     #         logger.info(f"Successfully set HiDe-Prompt task_id to: {task_id} (config: {data_args.task_config_dir})")
     # except Exception as _e:
     #     logger.warning(f"Failed to set HiDe task id pre-training: {_e}")
@@ -532,53 +771,53 @@ def main():
     # fine-tune loranew_A/B (initialized in "update_layer"[lora.py])
     # optional: lora_A/B is trainable but should not move too far from lorapre_A/B
     # (constrained in "training_step"[uie_trainer_lora.py])
-    for name, param in model.named_parameters():
-        if name.find("loranew_") != -1:
-            # for Inflora, only train loranew_B
-            if model_args.peft_type.upper() == "INFLORA" and name.find("loranew_B") != -1:
-                param.requires_grad = True
-            elif model_args.peft_type.upper() == "INFLORA" and name.find("loranew_A") != -1:
-                param.requires_grad = False
-            else:
-                param.requires_grad = True
-        elif name.find("lora_") != -1:
-            param.requires_grad = False
-        elif name.find("shared_historical_scalings") != -1:
-            param.requires_grad = True
-        # this module should always be frozen because we change the vocabulary
-        elif name.find("shared") != -1:
-            param.requires_grad = False
-        elif name.find("historical_directions") != -1:
-            param.requires_grad = False
-        elif name.find("scaling") != -1:
-            param.requires_grad = True
+    # for name, param in model.named_parameters():
+    #     if name.find("loranew_") != -1:
+    #         # for Inflora, only train loranew_B
+    #         if model_args.peft_type.upper() == "INFLORA" and name.find("loranew_B") != -1:
+    #             param.requires_grad = True
+    #         elif model_args.peft_type.upper() == "INFLORA" and name.find("loranew_A") != -1:
+    #             param.requires_grad = False
+    #         else:
+    #             param.requires_grad = True
+    #     elif name.find("lora_") != -1:
+    #         param.requires_grad = False
+    #     elif name.find("shared_historical_scalings") != -1:
+    #         param.requires_grad = True
+    #     # this module should always be frozen because we change the vocabulary
+    #     elif name.find("shared") != -1:
+    #         param.requires_grad = False
+    #     elif name.find("historical_directions") != -1:
+    #         param.requires_grad = False
+    #     elif name.find("scaling") != -1:
+    #         param.requires_grad = True
         
 
-    # L2P specific parameter freezing
-    if model_args.peft_type.upper() == "L2P":
-        print("Applying L2P parameter freezing...")
-        trainable_params = 0
-        frozen_params = 0
+    # # L2P specific parameter freezing
+    # if model_args.peft_type.upper() == "L2P":
+    #     print("Applying L2P parameter freezing...")
+    #     trainable_params = 0
+    #     frozen_params = 0
         
-        for name, param in model.named_parameters():
-            # Only allow L2P prompt pool and prompt key parameters to be trainable
-            if any(key in name for key in ["prompt", "prompt_key"]):
-                param.requires_grad = True
-                trainable_params += param.numel()
-                print(f"  Trainable: {name} ({param.numel()} params)")
-            # Also allow classification head to be trainable if it exists
-            elif any(key in name for key in ["classifier", "lm_head", "score"]):
-                param.requires_grad = True
-                trainable_params += param.numel()
-                print(f"  Trainable: {name} ({param.numel()} params)")
-            else:
-                param.requires_grad = False
-                frozen_params += param.numel()
+    #     for name, param in model.named_parameters():
+    #         # Only allow L2P prompt pool and prompt key parameters to be trainable
+    #         if any(key in name for key in ["prompt", "prompt_key"]):
+    #             param.requires_grad = True
+    #             trainable_params += param.numel()
+    #             print(f"  Trainable: {name} ({param.numel()} params)")
+    #         # Also allow classification head to be trainable if it exists
+    #         elif any(key in name for key in ["classifier", "lm_head", "score"]):
+    #             param.requires_grad = True
+    #             trainable_params += param.numel()
+    #             print(f"  Trainable: {name} ({param.numel()} params)")
+    #         else:
+    #             param.requires_grad = False
+    #             frozen_params += param.numel()
         
-        print(f"L2P Parameter Summary:")
-        print(f"  Trainable parameters: {trainable_params:,}")
-        print(f"  Frozen parameters: {frozen_params:,}")
-        print(f"  Trainable percentage: {100 * trainable_params / (trainable_params + frozen_params):.2f}%")
+    #     print(f"L2P Parameter Summary:")
+    #     print(f"  Trainable parameters: {trainable_params:,}")
+    #     print(f"  Frozen parameters: {frozen_params:,}")
+    #     print(f"  Trainable percentage: {100 * trainable_params / (trainable_params + frozen_params):.2f}%")
 
     # HiDe-Prompt specific parameter freezing
     if model_args.peft_type.upper() == "HIDE_PROMPT":
@@ -593,7 +832,7 @@ def main():
                 trainable_params += param.numel()
                 print(f"  Trainable: {name} ({param.numel()} params)")
             # Also allow classification head to be trainable if it exists
-            elif any(key in name for key in ["classifier", "lm_head", "score"]):
+            elif any(key in name for key in ["classifier", "lm_head", "score","shared"]):
                 param.requires_grad = True
                 trainable_params += param.numel()
                 print(f"  Trainable: {name} ({param.numel()} params)")
@@ -795,93 +1034,16 @@ def main():
         #     trainer.lr_scheduler = scheduler
             # trainer.lr_scheduler = custom_scheduler
 
-
-        if model_args.peft_type.upper() == "INFLORA":
-            trainer.model.base_model._cur_task = task_id-1
-            # get current feature matrix
-            print('----------------------------first run----------------------------')
-            base = trainer.model.base_model
-            trainer.args.get_cur_feat = True
-            for m in base.modules():
-                if isinstance(m, InfLoraLayer) :
-                    # m.get_feat = getattr(trainer.args, "get_feat", False)
-                    m.get_cur_feat = True
-                    # print(f"Set {name} get_feat to {module.get_feat}, get_cur_feat to {module.get_cur_feat}")
-            trainer.train(resume_from_checkpoint=checkpoint)
-            for m in base.modules():
-                if isinstance(m, InfLoraLayer) :
-                    # m.get_feat = getattr(trainer.args, "get_feat", False)
-                    m.get_cur_feat = False
-            trainer.args.get_cur_feat = False
-            
-            # InfLoraModel
-            print("Initialize loranew_A with SVD of current collected gradients")
-            base = trainer.model.base_model
-            # set loranew_A 
-            # task == 0 
-            if 'adapter' not in model_args.model_name_or_path:
-                for module in base.modules():
-                    if isinstance(module, InfLoraLayer):
-                        adapter = getattr(module, "active_adapter", "default")
-                        cur_matrix = module.cur_matrix
-                        U, S, V = torch.linalg.svd(cur_matrix)
-                        module.loranew_A[adapter].weight.data.copy_(U[:,:module.r[adapter]].T/math.sqrt(3))
-                        module.cur_matrix.zero_()
-                        module.n_cur_matrix = 0
-            # task >= 1
-            else:
-                kk = 0
-                for module in base.modules():
-                    if isinstance(module, InfLoraLayer):
-                        adapter = getattr(module, "active_adapter", "default")
-                        cur_matrix = module.cur_matrix.to(base.feature_mat[kk].device)
-                        if base.project_type[kk] == 'remove':
-                            cur_matrix = cur_matrix - torch.mm(base.feature_mat[kk],cur_matrix)
-                        else:
-                            assert base.project_type[kk] == 'retain'
-                            cur_matrix = torch.mm(base.feature_mat[kk],cur_matrix)
-                        cU, cS, cV = torch.linalg.svd(cur_matrix, full_matrices=False)
-                        module.loranew_A[adapter].weight.data.copy_(cU[:,:module.r[adapter]].T/math.sqrt(3))
-                        module.cur_matrix.zero_()
-                        module.n_cur_matrix = 0
-                        kk += 1
-            print("Initialization done!")
-                        
-        
-        train_result = trainer.train(resume_from_checkpoint=checkpoint)
-        
-        if model_args.peft_type.upper() == "INFLORA":
-            print("getting feature directions for task ", task_id-1)
-            base = trainer.model.base_model
-            # get current feature matrix
-            trainer.args.get_cur_feat = True
-            for m in base.modules():
-                if isinstance(m, InfLoraLayer) :
-                    # m.get_feat = getattr(trainer.args, "get_feat", False)
-                    m.get_cur_feat = True
-            trainer.train(resume_from_checkpoint=checkpoint)
-            for m in base.modules():
-                if isinstance(m, InfLoraLayer) :
-                    # m.get_feat = getattr(trainer.args, "get_feat", False)
-                    m.get_cur_feat = False
-            trainer.args.get_cur_feat = False   
+        # transfer previous prompt key if not the first task
+        if task_id > 0:
+            cur_idx = (slice(None), slice(None), slice(task_id, task_id+1))
+            prev_idx = (slice(None), slice(None),slice(task_id-1, task_id))
+            if model.prompt_encoder[model.active_adapter].prompt.grad is not None:
+                model.prompt_encoder[model.active_adapter].prompt.grad.zero_()
             with torch.no_grad():
-                mat_list = []
-                for module in base.modules():
-                    if isinstance(module, InfLoraLayer):
-                        mat_list.append(deepcopy(module.cur_matrix))
-                        module.cur_matrix.zero_()
-                        module.n_cur_matrix = 0
-                # self.update_GPM(mat_list)
-                base.update_DualGPM(mat_list)
+                model.prompt_encoder[model.active_adapter].prompt[cur_idx] = model.prompt_encoder[model.active_adapter].prompt[prev_idx]
 
-                # Projection Matrix Precomputation
-                base.feature_mat = []
-                for p in range(len(base.feature_list)):
-                    Uf=torch.Tensor(np.dot(base.feature_list[p],base.feature_list[p].transpose()))
-                    # print('Layer {} - Projection Matrix shape: {}'.format(p+1,Uf.shape))
-                    base.feature_mat.append(Uf)
-            print("Feature directions for task ", task_id-1, " stored!")
+        train_result = trainer.train(resume_from_checkpoint=checkpoint)
 
         # For HiDe-Prompt: apply momentum update on e_prompt after finishing this task, then save
         try:
@@ -893,9 +1055,26 @@ def main():
                     else int(get_hide_prompt_task_id(base_model))
                 )
                 if update_hide_prompt_after_task(base_model, cur_task_id, float(training_args.prompt_momentum)):
-                    logger.info(
+                    print(
                         f"HiDe-Prompt: updated e_prompt for task {cur_task_id} with momentum={training_args.prompt_momentum}"
                     )
+            
+            # 更新mean和cov
+            _compute_mean(model, training_args.device, task_id, args=training_args, method=training_args.ca_storage_efficient_method)
+            
+            # # 如果不是第一个任务，执行任务自适应预测训练
+            # if task_id > 0 and not training_args.not_train_ca:
+            #     print(f"Starting task adaptive prediction training for task {task_id}")
+            #     train_task_adaptive_prediction(
+            #         model=trainer.model,
+            #         tokenizer=tokenizer,
+            #         args=training_args,
+            #         device=training_args.device,
+            #         task_id=task_id,
+            #         method=training_args.ca_storage_efficient_method
+            #     )
+
+                
         except Exception as _e:
             logger.warning(f"HiDe-Prompt post-task update failed: {_e}")
 

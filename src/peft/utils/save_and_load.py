@@ -15,6 +15,9 @@
 
 from .config import PeftType, PromptLearningConfig
 import torch
+from typing import Any, Dict
+import numpy as np
+from peft.tuners.inflora import LoraLayer as InfLoraLayer
 
 
 def set_l2p_task_id(model, task_id, adapter_name="default"):
@@ -164,7 +167,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
                             break # target modules have been matched
 
                 
-    if config.peft_type in (PeftType.LORA, PeftType.ADALORA, PeftType.SDLORA):
+    if config.peft_type in (PeftType.LORA, PeftType.ADALORA, PeftType.SDLORA,PeftType.INFLORA):
         # to_return = lora_state_dict(model, bias=model.peft_config.bias)
         # adapted from `https://github.com/microsoft/LoRA/blob/main/loralib/utils.py`
         # to be used directly with the state dict which is necessary when using DeepSpeed or FSDP
@@ -176,12 +179,15 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
                 to_return = {k: state_dict[k] for k in state_dict if "lora_" in k or "loranew_" in k} # modified
             else:
                 base_keys = {k: state_dict[k] for k in state_dict if "lora_" in k}
-                # For SDLoRA with separate storage, also include historical directions and scalings
+                # For SDLoRA with separate storage, also include historical directions and shared scalings
                 if config.peft_type == PeftType.SDLORA:
-                    historical_keys = {k: state_dict[k] for k in state_dict if "historical_directions" in k or "historical_scalings" in k}
+                    # 包含历史方向和共享的scaling参数
+                    historical_keys = {k: state_dict[k] for k in state_dict if "historical_directions" in k}
+                    # 包含共享的scaling参数（现在在SDLoraModel级别）
+                    shared_scaling_keys = {k: state_dict[k] for k in state_dict if "shared_historical_scalings" in k}
                     # Also save num_historical_directions for each layer
                     num_directions_keys = {k: state_dict[k] for k in state_dict if "num_historical_directions" in k}
-                    to_return = {**base_keys, **historical_keys, **num_directions_keys}
+                    to_return = {**base_keys, **historical_keys, **shared_scaling_keys, **num_directions_keys}
                 else:
                     to_return = base_keys
                 # Update r_sum for SDLoRA based on consolidated lora_A size
@@ -205,7 +211,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
             raise NotImplementedError
 
         # modified
-        to_return = {k: v for k, v in to_return.items() if (("lora_" in k and adapter_name in k) or ("bias" in k) or ("loranew_" in k) or ("historical_directions" in k) or ("historical_scalings" in k) or ("num_historical_directions" in k))}
+        to_return = {k: v for k, v in to_return.items() if (("lora_" in k and adapter_name in k) or ("bias" in k) or ("loranew_" in k) or ("historical_directions" in k) or ("shared_historical_scalings" in k) or ("num_historical_directions" in k))}
         
         if config.peft_type == PeftType.ADALORA:
             rank_pattern = config.rank_pattern
@@ -213,6 +219,43 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
                 rank_pattern = {k.replace(f".{adapter_name}", ""): v for k, v in rank_pattern.items()}
                 config.rank_pattern = rank_pattern
                 to_return = model.resize_state_dict_by_rank_pattern(rank_pattern, to_return, adapter_name)
+
+        # ---- InfLoRA: persist continual-learning state (best-effort) ----
+        if config.peft_type == PeftType.INFLORA:
+            inf_state: Dict[str, Any] = {}
+            # feature_list / feature_mat
+            feat_list = []
+            for item in getattr(model, "feature_list"):
+                #store as tensor, load as nparray
+                t = item
+                if not torch.is_tensor(t):
+                    t = torch.as_tensor(t)
+                feat_list.append(t.detach().cpu())
+            inf_state["feature_list"] = feat_list
+                
+            feat_mat = []
+            for item in getattr(model, "feature_mat"):
+                t = item
+                if not torch.is_tensor(t):
+                    t = torch.as_tensor(t)
+                feat_mat.append(t.detach().cpu())
+            inf_state["feature_mat"] = feat_mat
+
+            inf_state["project_type"] = model.project_type
+
+            # Per-layer matrices by module dotted path
+            per_layer: Dict[str, Dict[str, Any]] = {}
+            for name, module in model.named_modules():
+                if isinstance(module, InfLoraLayer):
+                    layer_state: Dict[str, Any] = {
+                        "matrix": (module.matrix.detach().cpu() if torch.is_tensor(module.matrix) else torch.as_tensor(module.matrix)),
+                        "n_matrix": int(module.n_matrix),
+                        "cur_matrix": (module.cur_matrix.detach().cpu() if torch.is_tensor(module.cur_matrix) else torch.as_tensor(module.cur_matrix)),
+                        "n_cur_matrix": int(module.n_cur_matrix),
+                    }
+                    per_layer[name] = layer_state
+            inf_state["per_layer"] = per_layer
+            to_return["inflora_state"] = inf_state
 
     elif config.peft_type == PeftType.ADAPTION_PROMPT:
         to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
@@ -258,7 +301,39 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
             current_task_id = getattr(config, "current_task_id", getattr(model, "_current_task_id", None))
             if current_task_id is not None:
                 hide_meta["task_id"] = int(current_task_id)
+            
+            # 保存 dataset_map 用于持久化
+            if hasattr(eprompt, "dataset_map") and eprompt.dataset_map:
+                hide_meta["dataset_map"] = dict(eprompt.dataset_map)  # 转换为普通字典以确保可序列化
+                print(f"HiDe-Prompt: 保存 dataset_map，包含 {len(eprompt.dataset_map)} 个数据集映射")
+            
             to_return["hide_prompt_meta"] = hide_meta
+            
+            # 保存CR loss相关的类别统计信息
+            try:
+                from uie_trainer_lora import cls_mean, cls_cov
+                if cls_mean or cls_cov:
+                    cr_loss_data = {
+                        "cls_mean": {k: [v.cpu() if torch.is_tensor(v) else [t.cpu() for t in v] if isinstance(v, list) else v] for k, v in cls_mean.items()},
+                        "cls_cov": {k: [v.cpu() if torch.is_tensor(v) else [t.cpu() for t in v] if isinstance(v, list) else v] for k, v in cls_cov.items()}
+                    }
+                    to_return["cr_loss_data"] = cr_loss_data
+                    print(f"HiDe-Prompt: 保存 CR loss 数据，包含 {len(cls_mean)} 个类别统计")
+            except ImportError:
+                pass
+            
+            for key, value in state_dict.items():
+                # 保存 lm_head, shared, embed_tokens 等语言模型关键组件
+                if any(module_name in key for module_name in ["lm_head", "shared", "embed_tokens"]):
+                    # 去除可能的 adapter 后缀，确保键名的一致性
+                    clean_key = key.replace(f".{adapter_name}", "")
+                    to_return[clean_key] = value
+                    print(f"HiDe-Prompt: 保存关键模块 {clean_key}")
+                # 也保存分类器等任务相关的头部
+                elif any(module_name in key for module_name in ["classifier", "score"]):
+                    clean_key = key.replace(f".{adapter_name}", "")
+                    to_return[clean_key] = value
+                    print(f"HiDe-Prompt: 保存任务模块 {clean_key}")
         else:
             # 其他 PromptLearningConfig 维持原逻辑
             if config.inference_mode:
@@ -339,12 +414,12 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                         break
                 
                 # Check if this is a LoRA layer with historical directions capability
-                if hasattr(current_module, 'historical_directions') and hasattr(current_module, 'historical_scalings'):
+                if hasattr(current_module, 'historical_directions'):
                     # Ensure the adapter key exists in historical_directions
                     if adapter_key not in current_module.historical_directions:
                         current_module.historical_directions[adapter_key] = torch.nn.ModuleDict()
-                    if adapter_key not in current_module.historical_scalings:
-                        current_module.historical_scalings[adapter_key] = torch.nn.ParameterDict()
+                    
+                    # 不再处理historical_scalings，因为它们现在在SDLoraModel级别管理
                     
                     # Create each direction
                     for direction_key, components in directions.items():
@@ -361,18 +436,46 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                             
                             # Add to historical_directions
                             current_module.historical_directions[adapter_key][direction_key] = direction_module
-                            
-                            # Create placeholder scaling parameter
-                            scaling_param = torch.nn.Parameter(torch.tensor(1.0, dtype=A_weight.dtype))
-                            current_module.historical_scalings[adapter_key][direction_key] = scaling_param
 
-                            new_num_directions = max(current_module.num_historical_directions[adapter_key], int(direction_key.split('_')[1]) + 1)
+                            new_num_directions = max(current_module.num_historical_directions.get(adapter_key, torch.tensor(0)).item(), int(direction_key.split('_')[1]) + 1)
                             current_module.num_historical_directions[adapter_key] = torch.nn.Parameter(
                                 torch.tensor(new_num_directions, dtype=torch.long), 
                                 requires_grad=False
                             )
 
-    if config.peft_type in (PeftType.LORA, PeftType.ADALORA, PeftType.SDLORA):
+    if config.peft_type in (PeftType.LORA, PeftType.ADALORA, PeftType.SDLORA, PeftType.INFLORA):
+        # ---- InfLoRA: restore continual-learning state prior to weight loading ----
+        if config.peft_type == PeftType.INFLORA and "inflora_state" in state_dict:
+            inf_state = state_dict.get("inflora_state", {})
+            if isinstance(inf_state, dict):
+                # feature_list / feature_mat
+                if "feature_list" in inf_state:
+                    #store as tensor, load as nparray
+                    fl = [t if not torch.is_tensor(t) else np.asarray(t.cpu()) for t in inf_state["feature_list"]]
+                    model.base_model.feature_list = fl
+                if "feature_mat" in inf_state:
+                    fm = [t if torch.is_tensor(t) else torch.as_tensor(t) for t in inf_state["feature_mat"]]
+                    model.base_model.feature_mat = fm
+                if "project_type" in inf_state:
+                    model.base_model.project_type = list(inf_state["project_type"])
+                # Per-layer
+                if "per_layer" in inf_state and isinstance(inf_state["per_layer"], dict):
+                    for layer_path, lstate in inf_state["per_layer"].items():
+                        obj = model
+                        for part in layer_path.split("."):
+                            if not part:
+                                continue
+                            obj = getattr(obj, part)
+                        if hasattr(obj, "matrix") and "matrix" in lstate:
+                            val = lstate["matrix"]
+                            setattr(obj, "matrix", val if torch.is_tensor(val) else torch.as_tensor(val))
+                        if hasattr(obj, "n_matrix") and "n_matrix" in lstate:
+                            setattr(obj, "n_matrix", int(lstate["n_matrix"]))
+                        if hasattr(obj, "cur_matrix") and "cur_matrix" in lstate:
+                            val = lstate["cur_matrix"]
+                            setattr(obj, "cur_matrix", val if torch.is_tensor(val) else torch.as_tensor(val))
+                        if hasattr(obj, "n_cur_matrix") and "n_cur_matrix" in lstate:
+                            setattr(obj, "n_cur_matrix", int(lstate["n_cur_matrix"]))
         peft_model_state_dict = {}
         for k, v in state_dict.items():
             if "lora_" in k:
@@ -393,11 +496,25 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                 else:
                     k = f"{k}.{adapter_name}"
                 peft_model_state_dict[k] = v
+            elif k == "inflora_state":
+                # Already restored above; skip passing to load_state_dict
+                continue
             # For SDLoRA: handle historical_directions, historical_scalings, and num_historical_directions
-            elif "historical_directions" in k or "historical_scalings" in k or "num_historical_directions" in k:
-                k = k.replace("historical_directions", f"historical_directions.{adapter_name}")
-                k = k.replace("historical_scalings", f"historical_scalings.{adapter_name}")
-                # k = k.replace("num_historical_directions", f"num_historical_directions.{adapter_name}")
+            # 注释掉historical_scalings的加载机制，改为在每个task初始化时创建
+            # elif "historical_directions" in k or "historical_scalings" in k or "num_historical_directions" in k:
+            #     k = k.replace("historical_directions", f"historical_directions.{adapter_name}")
+            #     k = k.replace("historical_scalings", f"historical_scalings.{adapter_name}")
+            #     # k = k.replace("num_historical_directions", f"num_historical_directions.{adapter_name}")
+
+            #     # 重置historical_scalings
+            #     if "historical_scalings" in k:
+            #         peft_model_state_dict[k] = torch.tensor(0.8,device=v.device,dtype=v.dtype)
+            #         continue
+            elif "historical_directions" in k or "num_historical_directions" in k or "shared_historical_scalings" in k:
+                # 处理historical_directions, num_historical_directions, 和shared_historical_scalings
+                if "historical_directions" in k:
+                    k = k.replace("historical_directions", f"historical_directions.{adapter_name}")
+                # shared_historical_scalings保持原样，因为它们在SDLoraModel级别
                 peft_model_state_dict[k] = v
             else:
                 peft_model_state_dict[k] = v
@@ -424,7 +541,6 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                 with torch.no_grad():
                     l2p.prompt_key.data.copy_(state_dict["prompt_key"].to(l2p.prompt_key.dtype))
             
-            # 实现PILOT式的任务迁移逻辑
             if "l2p_meta" in state_dict:
                 l2p_meta = state_dict["l2p_meta"]
                 prev_task_id = l2p_meta.get("task_id", 0)
@@ -506,9 +622,68 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                 meta = state_dict["hide_prompt_meta"]
                 if "task_id" in meta:
                     config.current_task_id = int(meta["task_id"])  # 记录到 config 与 model
-                    model._current_task_id = int(meta["task_id"]) 
-            # 已处理专有字段，避免重复加载
+                    model._current_task_id = int(meta["task_id"])
+                
+                # 恢复 dataset_map
+                if "dataset_map" in meta and hasattr(eprompt, "dataset_map"):
+                    eprompt.dataset_map.clear()  # 清空现有映射
+                    eprompt.dataset_map.update(meta["dataset_map"])  # 加载保存的映射
+                    print(f"HiDe-Prompt: 恢复 dataset_map，包含 {len(eprompt.dataset_map)} 个数据集映射: {dict(eprompt.dataset_map)}")
+            
+            # 恢复CR loss相关的类别统计信息
+            if "cr_loss_data" in state_dict:
+                try:
+                    from uie_trainer_lora import cls_mean, cls_cov
+                    cr_data = state_dict["cr_loss_data"]
+                    
+                    # 恢复cls_mean
+                    for k, v in cr_data.get("cls_mean", {}).items():
+                        if isinstance(v, list):
+                            cls_mean[k] = []
+                            for t in v:
+                                if torch.is_tensor(t):
+                                    cls_mean[k].append(t)
+                                else:
+                                    cls_mean[k].append(torch.as_tensor(t[0]))
+                        else:
+                            if torch.is_tensor(v):
+                                cls_mean[k] = v
+                            else:
+                                cls_mean[k] = torch.as_tensor(v)
+                    
+                    # 恢复cls_cov  
+                    for k, v in cr_data.get("cls_cov", {}).items():
+                        if isinstance(v, list):
+                            cls_cov[k] = []
+                            for t in v:
+                                if torch.is_tensor(t):
+                                    cls_cov[k].append(t)
+                                else:
+                                    cls_cov[k].append(torch.as_tensor(t[0]))
+                        else:
+                            if torch.is_tensor(v):
+                                cls_cov[k] = v
+                            else:
+                                cls_cov[k] = torch.as_tensor(v)
+                    
+                    print(f"HiDe-Prompt: 恢复 CR loss 数据，包含 {len(cls_mean)} 个类别统计")
+                except ImportError:
+                    print("Warning: 无法导入 cls_mean, cls_cov，跳过 CR loss 数据恢复")
+            
+            # 分离出需要加载到模型的权重（lm_head, shared 等关键模块）
             peft_model_state_dict = {}
+            for k, v in state_dict.items():
+                # 处理关键模块权重：lm_head, shared, embed_tokens, classifier, score
+                if any(module_name in k for module_name in ["lm_head", "shared", "embed_tokens", "classifier", "score"]):
+                    # 这些权重直接加载到模型中，无需特殊处理
+                    peft_model_state_dict[k] = v
+                    print(f"HiDe-Prompt: 准备加载关键模块 {k}")
+                # 跳过已经处理的 HiDe-Prompt 专有字段
+                elif k in ["hide_prompt_pool", "hide_prompt_key", "hide_prompt_meta", "cr_loss_data"]:
+                    continue
+                else:
+                    # 其他权重正常加载
+                    peft_model_state_dict[k] = v
         else:
             peft_model_state_dict = state_dict
     else:
@@ -518,7 +693,18 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
     with open("peft_model_state_dict_debug.log","w") as f:
         for k, v in peft_model_state_dict.items():
             f.write(f"{k}: {v}\n")
+        
     model.load_state_dict(peft_model_state_dict, strict=False)
+    
+    # 特殊处理：SDLoraModel需要在加载后为各层绑定共享的historical scaling视图
+    if config.peft_type == PeftType.SDLORA:
+        # 优先调用公开绑定逻辑
+        if hasattr(model, '_bind_shared_scalings_to_layers'):
+            try:
+                model._bind_shared_scalings_to_layers(adapter_name)
+            except Exception:
+                pass
+    
     if isinstance(config, PromptLearningConfig) and config.peft_type not in [PeftType.L2P, PeftType.HIDE_PROMPT]:
          model.prompt_encoder[adapter_name].embedding.load_state_dict(
              {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True

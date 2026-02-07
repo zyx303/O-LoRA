@@ -1,4 +1,3 @@
-
 1. 训练的参数是ψ（lm_head), prompt
 2. default是只启用e_prompt（vit的**前5个layer**, 用prefix，train和infer都是)：
    
@@ -232,3 +231,17 @@
 >
 > 补充
 > - pre_logits 的来源：模型前向返回，键名为 `'pre_logits'`，由 `VisionTransformer.forward_head` 在分类头之前导出；其值在 WTP 的 `train_one_epoch` 中传入 `orth_loss`。
+
+
+
+
+
+![image-20250927164622261](https://blogstastic-zyx.oss-cn-hangzhou.aliyuncs.com/images/image-20250927164622261.png)
+
+uie_collator.seq2seq_call
+
+![image-20250927164841814](./hideprompt.assets/image-20250927164841814.png)
+
+![image-20250927164917880](./hideprompt.assets/image-20250927164917880.png)
+
+[B,len]

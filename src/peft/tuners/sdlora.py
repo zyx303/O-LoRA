@@ -108,6 +108,8 @@ class SDLoraModel(torch.nn.Module):
         self.model = model
         self.forward = self.model.forward
         self.peft_config = config
+        # 跨层共享的historical scaling参数
+        self.shared_historical_scalings = nn.ParameterDict({})
         self.add_adapter(adapter_name, self.peft_config[adapter_name])
 
     def add_adapter(self, adapter_name, config=None):
@@ -115,6 +117,10 @@ class SDLoraModel(torch.nn.Module):
             model_config = self.model.config.to_dict() if hasattr(self.model.config, "to_dict") else self.model.config
             config = self._prepare_lora_config(config, model_config)
             self.peft_config[adapter_name] = config
+        
+        # 初始化该adapter的共享historical scaling参数
+        self._init_shared_historical_scalings(adapter_name)
+        
         self._find_and_replace(adapter_name)
         if len(self.peft_config) > 1 and self.peft_config[adapter_name].bias != "none":
             raise ValueError(
@@ -123,6 +129,24 @@ class SDLoraModel(torch.nn.Module):
         mark_only_lora_as_trainable(self.model, self.peft_config[adapter_name].bias)
         if self.peft_config[adapter_name].inference_mode:
             _freeze_adapter(self.model, adapter_name)
+
+    def _init_shared_historical_scalings(self, adapter_name):
+        """初始化adapter的共享historical scaling参数"""
+        if adapter_name not in self.shared_historical_scalings:
+            # 为每个adapter初始化20个历史方向的可训练scaling参数
+            adapter_scalings = {}
+            for i in range(20):  # 20个历史方向
+                direction_key = f"dir_{i}"
+                adapter_scalings[direction_key] = nn.Parameter(
+                    torch.tensor([0.8], dtype=torch.float32), 
+                    requires_grad=True
+                )
+            self.shared_historical_scalings[adapter_name] = nn.ParameterDict(adapter_scalings)
+
+    def get_shared_historical_scalings(self, adapter_name):
+        """获取指定adapter的共享historical scaling参数"""
+        return self.shared_historical_scalings.get(adapter_name, {})
+
 
     def _find_and_replace(self, adapter_name):
         lora_config = self.peft_config[adapter_name]
@@ -163,18 +187,20 @@ class SDLoraModel(torch.nn.Module):
                     )
                 else:
                     if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
-                        eightbit_kwargs = kwargs.copy()
-                        eightbit_kwargs.update(
-                            {
-                                "has_fp16_weights": target.state.has_fp16_weights,
-                                "memory_efficient_backward": target.state.memory_efficient_backward,
-                                "threshold": target.state.threshold,
-                                "index": target.index,
-                            }
-                        )
-                        new_module = Linear8bitLt(
-                            adapter_name, target.in_features, target.out_features, bias=bias, **eightbit_kwargs
-                        )
+                        # 暂时跳过8bit量化的支持，或者可以取消注释文件末尾的Linear8bitLt类
+                        raise NotImplementedError("8-bit quantization support is currently disabled for SDLoRA")
+                        # eightbit_kwargs = kwargs.copy()
+                        # eightbit_kwargs.update(
+                        #     {
+                        #         "has_fp16_weights": target.state.has_fp16_weights,
+                        #         "memory_efficient_backward": target.state.memory_efficient_backward,
+                        #         "threshold": target.state.threshold,
+                        #         "index": target.index,
+                        #     }
+                        # )
+                        # new_module = Linear8bitLt(
+                        #     adapter_name, target.in_features, target.out_features, bias=bias, **eightbit_kwargs
+                        # )
                     elif isinstance(target, torch.nn.Embedding):
                         embedding_kwargs = kwargs.copy()
                         embedding_kwargs.pop("fan_in_fan_out", None)
@@ -210,6 +236,17 @@ class SDLoraModel(torch.nn.Module):
             raise ValueError(
                 f"Target modules {lora_config.target_modules} not found in the base model."
             )
+        
+        # 为所有LoRA层注入共享 historical scaling 视图
+        self._bind_shared_scalings_to_layers(adapter_name)
+
+    def _bind_shared_scalings_to_layers(self, adapter_name):
+        shared = self.shared_historical_scalings.get(adapter_name, None)
+        if shared is None:
+            return
+        for module in self.model.modules():
+            if isinstance(module, LoraLayer):
+                module.set_shared_historical_scalings(adapter_name, shared)
 
     def _replace_module(self, parent_module, child_name, new_module, old_module):
         setattr(parent_module, child_name, new_module)
@@ -307,16 +344,17 @@ class SDLoraModel(torch.nn.Module):
                 if adapter_name in module.loranew_A and adapter_name in module.lora_A:
                     current_A = module.loranew_A[adapter_name].weight.detach().clone()
                     current_B = module.loranew_B[adapter_name].weight.detach().clone()
+                    # initial_scaling = module.scaling[adapter_name] * torch.norm(current_A) * torch.norm(current_B)
                     
                     # Add current directions as a new historical direction
                     module.add_historical_direction(adapter_name, current_A, current_B)
-                    
+
                     # Reset current task's LoRA for next task
                     with torch.no_grad():
                         module.loranew_A[adapter_name].weight.zero_()
                         module.loranew_B[adapter_name].weight.zero_()
 
-
+# 后面会被覆盖
 def mark_only_lora_as_trainable(model: nn.Module, bias: str = "none") -> None:
     for n, p in model.named_parameters():
         if "lora_" not in n:
@@ -339,16 +377,19 @@ class LoraLayer:
     def __init__(self, in_features: int, out_features: int):
         self.r = {}
         self.lora_alpha = {}
-        self.scaling = {}
+        self.scaling = {} #只有embedding用，恒定
         self.lora_dropout = nn.ModuleDict({})
         # 当前任务的LoRA参数
         self.loranew_A = nn.ModuleDict({})
         self.loranew_B = nn.ModuleDict({})
         # 历史方向存储：每个方向分开保存
         self.historical_directions = nn.ModuleDict({})  # 存储历史A和B矩阵
-        self.historical_scalings = nn.ParameterDict({})  # 存储每个历史方向的可训练scaling
+        # 移除本地的historical_scalings，改为从SDLoraModel获取
+        # self.historical_scalings = nn.ParameterDict({})  # 移除这行
         # 使用 ParameterDict 来保存历史方向数量，这样可以被torch保存和加载
         self.num_historical_directions = nn.ParameterDict({})  # 记录每个adapter的历史方向数量
+        # 注入的共享 historical scaling 视图：adapter_name -> ParameterDict(dir_i -> Parameter)
+        self.shared_historical_scalings_view = {}
         # Embedding相关参数
         self.lora_embedding_A = nn.ParameterDict({})
         self.lora_embedding_B = nn.ParameterDict({})
@@ -363,6 +404,10 @@ class LoraLayer:
         self.disable_adapters = False
         self.in_features = in_features
         self.out_features = out_features
+
+    def set_shared_historical_scalings(self, adapter_name, shared_scalings: nn.ParameterDict):
+        """注入共享 historical scaling 的只读视图，避免子模块引用父模型。"""
+        self.shared_historical_scalings_view[adapter_name] = shared_scalings
 
     def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, r_sum):
         self.r[adapter_name] = r
@@ -381,7 +426,9 @@ class LoraLayer:
             # 初始化历史方向存储
             self.num_historical_directions[adapter_name] = nn.Parameter(torch.tensor(0, dtype=torch.long), requires_grad=False)
             self.historical_directions.update(nn.ModuleDict({adapter_name: nn.ModuleDict({})}))
-            self.historical_scalings.update(nn.ParameterDict({adapter_name: nn.ParameterDict({})}))
+            
+            # 移除本地historical_scalings的初始化，改为从SDLoraModel获取
+            # historical_scalings现在由SDLoraModel统一管理
             
             # 为了向后兼容，保留原始的lora_A和lora_B（但现在它们只是占位符）
             if r_sum > 0:
@@ -393,7 +440,7 @@ class LoraLayer:
                 self.lora_B.update(nn.ModuleDict({adapter_name: nn.Linear(0, self.out_features, bias=False)}))
             
             # self.scaling[adapter_name] = lora_alpha / r if r > 0 else 1.0
-            self.scaling[adapter_name] = 0.8
+            # self.scaling[adapter_name] = nn.Parameter(torch.Tensor([0.8]), requires_grad=True)
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
         self.to(self.weight.device)
@@ -405,13 +452,8 @@ class LoraLayer:
             adapter_name: adapter名称
             direction_A: A矩阵 [r, in_features]
             direction_B: B矩阵 [out_features, r]
-            initial_scaling: 初始scaling值
+            initial_scaling: 初始scaling值（现在由SDLoraModel统一管理）
         """
-        if adapter_name not in self.historical_directions:
-            self.historical_directions.update(nn.ModuleDict({adapter_name: nn.ModuleDict({})}))
-            self.historical_scalings.update(nn.ParameterDict({adapter_name: nn.ParameterDict({})}))
-            self.num_historical_directions[adapter_name] = nn.Parameter(torch.tensor(0, dtype=torch.long), requires_grad=False)
-        
         direction_idx = self.num_historical_directions[adapter_name].item()
         direction_name = f"dir_{direction_idx}"
         
@@ -432,9 +474,8 @@ class LoraLayer:
         # 添加到历史方向中
         self.historical_directions[adapter_name].update(nn.ModuleDict({direction_name: direction_module}))
         
-        # 添加可训练的scaling参数
-        scaling_param = nn.Parameter(torch.tensor(initial_scaling, dtype=direction_A.dtype, device=direction_A.device))
-        self.historical_scalings[adapter_name].update(nn.ParameterDict({direction_name: scaling_param}))
+        # scaling参数现在由SDLoraModel统一管理，不再在这里设置
+        # 移除本地scaling参数的设置
         
         # 更新历史方向数量
         self.num_historical_directions[adapter_name].data = torch.tensor(direction_idx + 1, dtype=torch.long, device=direction_A.device)
@@ -555,18 +596,18 @@ class Linear(nn.Linear, LoraLayer):
             # Historical LoRA directions: sum over previous tasks with individual trainable scalings
             # This implements the sum: α_1 A_1 B_1 + α_2 A_2 B_2 + ... + α_{t-1} A_{t-1} B_{t-1}
             if self.active_adapter in self.num_historical_directions and self.num_historical_directions[self.active_adapter].item() > 0:
+                # 使用注入的共享historical scaling参数视图
+                historical_scalings = self.shared_historical_scalings_view.get(self.active_adapter, {})
+                
                 for i in range(self.num_historical_directions[self.active_adapter].item()):
                     direction_key = f"dir_{i}"
                     
                     if (self.active_adapter in self.historical_directions and 
                         direction_key in self.historical_directions[self.active_adapter] and
-                        self.active_adapter in self.historical_scalings and
-                        direction_key in self.historical_scalings[self.active_adapter]):
+                        direction_key in historical_scalings):
                         
                         # Get the historical direction components
-                        
-
-                         # 确保历史适配器层与输入数据类型一致
+                        # 确保历史适配器层与输入数据类型一致
                         target_device = x_lora.device
                         target_dtype = x_lora.dtype
                         
@@ -575,21 +616,32 @@ class Linear(nn.Linear, LoraLayer):
                         
                         historical_A = historical_A.to(device=target_device, dtype=target_dtype)
                         historical_B = historical_B.to(device=target_device, dtype=target_dtype)
-                        # Apply the direction with its individual trainable scaling
-                        # print('-'*40)
-                        # print(f"historical_A:{historical_A.weight.device}  {historical_A.weight.dtype}")
-                        # print(f"historical_B:{historical_B.weight.device}  {historical_B.weight.dtype}")
-                        # print(f"x_lora:{x_lora.device}  {x_lora.dtype}")
-                        # print('='*40)
-
-                        historical_output = historical_B(historical_A(x_lora))
-                        result = result + historical_output * self.historical_scalings[self.active_adapter][direction_key]
+                        
+                        # Apply the direction with its individual trainable scaling from SDLoraModel
+                        with torch.no_grad():
+                            norm_factor = torch.norm(historical_A.weight) * torch.norm(historical_B.weight)
+                        historical_output = historical_B(historical_A(x_lora)) / (norm_factor + 1e-8) * historical_scalings[direction_key]
+                        result = result + historical_output 
 
             # Current task LoRA: α_t A_t B_t  
             # This implements the current task term from equation (4)
             if has_new and self.r.get(self.active_adapter, 0) > 0:
-                current_output = self.loranew_B[self.active_adapter](self.loranew_A[self.active_adapter](x_lora))
-                result = result + current_output * self.scaling[self.active_adapter]
+                # 当前方向索引：使用“下一个”历史方向编号作为当前任务的缩放槽位
+                cur_idx = 0
+                if self.active_adapter in self.num_historical_directions:
+                    cur_idx = int(self.num_historical_directions[self.active_adapter].item())
+                direction_key_cur = f"dir_{cur_idx}"
+                historical_scalings = self.shared_historical_scalings_view.get(self.active_adapter, {})
+                scale_param = historical_scalings.get(direction_key_cur, None)
+
+                current_after_A = self.loranew_A[self.active_adapter](x_lora)
+                current_output_raw = self.loranew_B[self.active_adapter](current_after_A)
+                # norm_factor_cur = torch.norm(self.loranew_A[self.active_adapter].weight) * torch.norm(self.loranew_B[self.active_adapter].weight)
+                # if scale_param is not None:
+                #     current_output = current_output_raw / (norm_factor_cur + 1e-8) * scale_param
+                # else:
+                #     current_output = current_output_raw
+                result = result + current_output_raw * scale_param
 
         return result.to(previous_dtype)
 

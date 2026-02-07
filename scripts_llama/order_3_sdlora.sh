@@ -5,9 +5,9 @@ export CUDA_DEVICE_ORDER="PCI_BUS_ID"
 export TRANSFORMERS_CACHE=/root/.cache/huggingface
 port=$(shuf -i25000-30000 -n1)
  
-# bash scripts_llama/order_3_sdlora.sh> logs_and_outputs_llama/sdlora/order_3/logs/train_and_infer.log 2>&1 &
+#######！！！！！ bash scripts_llama/order_3_sdlora.sh> logs_and_outputs_llama/sdlora/order_3/logs/train_and_infer.log 2>&1 &
 
-CUDA_VISIBLE_DEVICES=1,2,3,4 deepspeed --master_port $port src/run_uie_lora.py \
+CUDA_VISIBLE_DEVICES=4,5 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
    --do_predict \
    --predict_with_generate \
@@ -18,7 +18,7 @@ CUDA_VISIBLE_DEVICES=1,2,3,4 deepspeed --master_port $port src/run_uie_lora.py \
    --instruction_strategy single \
    --output_dir logs_and_outputs_llama/sdlora/order_3/outputs/1-yahoo \
    --per_device_train_batch_size 1 \
-   --per_device_eval_batch_size 4 \
+   --per_device_eval_batch_size 8 \
    --gradient_accumulation_steps 8 \
    --learning_rate 1e-03 \
    --num_train_epochs 1 \
@@ -45,7 +45,7 @@ CUDA_VISIBLE_DEVICES=1,2,3,4 deepspeed --master_port $port src/run_uie_lora.py \
    
 sleep 5
 
-CUDA_VISIBLE_DEVICES=1,2,3,4 deepspeed --master_port $port src/run_uie_lora.py \
+CUDA_VISIBLE_DEVICES=4,5 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
    --do_predict \
    --predict_with_generate \
@@ -56,9 +56,9 @@ CUDA_VISIBLE_DEVICES=1,2,3,4 deepspeed --master_port $port src/run_uie_lora.py \
    --instruction_strategy single \
    --output_dir logs_and_outputs_llama/sdlora/order_3/outputs/2-amazon \
    --per_device_train_batch_size 1 \
-   --per_device_eval_batch_size 4 \
+   --per_device_eval_batch_size 8 \
    --gradient_accumulation_steps 8 \
-   --learning_rate 1e-04 \
+   --learning_rate 1e-03 \
    --num_train_epochs 1 \
    --deepspeed configs/ds_configs/stage2_llama.config \
    --run_name order3_round2 \
@@ -83,7 +83,7 @@ CUDA_VISIBLE_DEVICES=1,2,3,4 deepspeed --master_port $port src/run_uie_lora.py \
 
 sleep 5
 
-CUDA_VISIBLE_DEVICES=1,2,3,4 deepspeed --master_port $port src/run_uie_lora.py \
+CUDA_VISIBLE_DEVICES=4,5 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
    --do_predict \
    --predict_with_generate \
@@ -94,9 +94,9 @@ CUDA_VISIBLE_DEVICES=1,2,3,4 deepspeed --master_port $port src/run_uie_lora.py \
    --instruction_strategy single \
    --output_dir logs_and_outputs_llama/sdlora/order_3/outputs/3-agnews \
    --per_device_train_batch_size 1 \
-   --per_device_eval_batch_size 4 \
+   --per_device_eval_batch_size 8 \
    --gradient_accumulation_steps 8 \
-   --learning_rate 1e-04 \
+   --learning_rate 1e-03 \
    --num_train_epochs 1 \
    --deepspeed configs/ds_configs/stage2_llama.config \
    --run_name order3_round3 \
@@ -121,7 +121,7 @@ CUDA_VISIBLE_DEVICES=1,2,3,4 deepspeed --master_port $port src/run_uie_lora.py \
 
 sleep 5
 
-CUDA_VISIBLE_DEVICES=1,2,3,4 deepspeed --master_port $port src/run_uie_lora.py \
+CUDA_VISIBLE_DEVICES=4,5 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
    --do_predict \
    --predict_with_generate \
@@ -132,9 +132,9 @@ CUDA_VISIBLE_DEVICES=1,2,3,4 deepspeed --master_port $port src/run_uie_lora.py \
    --instruction_strategy single \
    --output_dir logs_and_outputs_llama/sdlora/order_3/outputs/4-dbpedia \
    --per_device_train_batch_size 1 \
-   --per_device_eval_batch_size 4 \
+   --per_device_eval_batch_size 8 \
    --gradient_accumulation_steps 8 \
-   --learning_rate 1e-04 \
+   --learning_rate 1e-03 \
    --num_train_epochs 1 \
    --deepspeed configs/ds_configs/stage2_llama.config \
    --run_name order3_round4 \

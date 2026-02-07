@@ -30,6 +30,8 @@ from .tuners import (
     PromptTuningConfig,
     L2PConfig,
     HidePromptConfig,
+    InfLoRAConfig,
+    InfLoraModel
 )
 from .utils import PromptLearningConfig
 
@@ -51,6 +53,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING = {
     "SDLORA": SDLoraConfig,
     "L2P": L2PConfig,
     "HIDE_PROMPT": HidePromptConfig,
+    "INFLORA": InfLoRAConfig
 }
 
 

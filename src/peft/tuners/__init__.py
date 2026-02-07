@@ -26,3 +26,4 @@ from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
 from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
 from .l2p import L2PPromptPool, L2PConfig, L2PInit
 from .hide_prompt import HidePromptConfig,EPrompt
+from .inflora import InfLoRAConfig, InfLoraModel
