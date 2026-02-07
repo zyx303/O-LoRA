@@ -1,10 +1,31 @@
 #!/bin/bash
+#SBATCH -N 1
+#SBATCH --mem=200G
+#SBATCH -p gpu_requeue
+#SBATCH --constraint="a100"
+#SBATCH --time=01:00:00
+#SBATCH --gres=gpu:2
+#SBATCH --cpus-per-task=32
+#SBATCH --output=slurm-%j.out
+#SBATCH --error=slurm-%j.err
 set -x
-
+echo "order1_hide"
 export CUDA_DEVICE_ORDER="PCI_BUS_ID"
-export TRANSFORMERS_CACHE=/data/yongxi/.cache/huggingface
+export CUDA_VISIBLE_DEVICES=0
+export TRANSFORMERS_CACHE=/n/holylfs05/LABS/pfister_lab/Lab/coxfs01/pfister_lab2/Lab/yichenwu/zyx/.cache/huggingface
+cd /n/holylfs05/LABS/pfister_lab/Lab/coxfs01/pfister_lab2/Lab/yichenwu/zyx/O-LoRA
+
+source /n/holylfs05/LABS/pfister_lab/Lab/coxfs01/pfister_lab2/Lab/yichenwu/zyx/bashrc
+
+# Activate conda environment (Python 3)
+eval "$(conda shell.bash hook)"
+conda activate /n/home02/ycwu/.conda/envs/lora
+
+# Load GCC 12 for building DeepSpeed extensions
+module load gcc/12.2.0-fasrc01
+
 port=$(shuf -i25000-30000 -n1)
-# export debug=1
+
 ##################!!!!!!!! bash scripts_llama/order_1_hide.sh > logs_and_outputs_llama/hide/order_1/logs/train_and_infer.log 2>&1
 
 # CUDA_VISIBLE_DEVICES=4,5,6,7 deepspeed --master_port $port src/run_uie_hide.py \
