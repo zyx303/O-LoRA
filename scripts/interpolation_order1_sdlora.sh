@@ -4,7 +4,7 @@ set -x
 
 export CUDA_DEVICE_ORDER="${CUDA_DEVICE_ORDER:-PCI_BUS_ID}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-/data/yongxi/.cache/huggingface}"
-CUDA_VISIBLE_DEVICES=1
+CUDA_VISIBLE_DEVICES=7
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-7}
 
 ADAPTER_A="${ADAPTER_A:-/home/yongxi/work/O-LoRA/exp/sdlora/order_1_test/outputs/2-amazon/adapter}"

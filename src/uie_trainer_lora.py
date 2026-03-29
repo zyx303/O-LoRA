@@ -561,7 +561,7 @@ class UIETrainer(Seq2SeqTrainer):
             generated_tokens = self._pad_tensors_to_max_len(generated_tokens, max_length)
 
         with torch.no_grad():
-            if has_labels:
+            if has_labels and not getattr(self.args, "skip_predict_loss", False):
                 with self.autocast_smart_context_manager():
                     outputs = model(**inputs)
                 if self.label_smoother is not None:

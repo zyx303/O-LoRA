@@ -272,6 +272,10 @@ class UIETrainingArguments(Seq2SeqTrainingArguments):
     # HiDe-Prompt continual learning parameters
     hide_task_id: Optional[int] = field(default=None, metadata={"help": "Current task ID for HiDe-Prompt CL"})
     prompt_momentum: float = field(default=0.0, metadata={"help": "Momentum for post-task HiDe prompt update [0-1]"})
+    skip_predict_loss: bool = field(
+        default=False,
+        metadata={"help": "Skip the extra forward pass used to compute predict loss during generation-based evaluation."},
+    )
 
 
 
@@ -353,9 +357,16 @@ def main():
     # Distributed training:
     # The .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
-    if 'adapter' in model_args.model_name_or_path: # load lora-config
+    is_adapter_model = 'adapter' in model_args.model_name_or_path
+    model_type_source = model_args.model_name_or_path
+    if is_adapter_model: # load lora-config
         config = PeftConfig.from_pretrained(model_args.model_name_or_path)
-        if 'llama' in model_args.model_name_or_path.lower():
+        model_type_source = config.base_model_name_or_path or model_args.model_name_or_path
+
+    is_llama_model = 'llama' in model_type_source.lower()
+
+    if is_adapter_model:
+        if is_llama_model:
             tokenizer = transformers.LlamaTokenizer.from_pretrained(config.base_model_name_or_path)
             config.bos_token_id = 1
             config.eos_token_id = 2
@@ -365,7 +376,7 @@ def main():
             tokenizer.pad_token_id = 1
         else:
             tokenizer = AutoTokenizer.from_pretrained(config.base_model_name_or_path)
-    elif 'llama' in model_args.model_name_or_path.lower():
+    elif is_llama_model:
         config = AutoConfig.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=model_args.cache_dir,
@@ -400,16 +411,16 @@ def main():
             use_auth_token=True if model_args.use_auth_token else None,
         )
 
-    if 'llama' in model_args.model_name_or_path.lower():  # add llama
+    if is_llama_model:  # add llama
         model_class = LlamaForCausalLM_with_lossmask
         tokenizer.padding_side = 'left'
     else: 
         model_class = AutoModelForSeq2SeqLM
 
-    if 'adapter' in model_args.model_name_or_path: # add lora-adapter to the original model
+    if is_adapter_model: # add lora-adapter to the original model
         model = model_class.from_pretrained(config.base_model_name_or_path)
         model = PeftModel.from_pretrained(model, model_args.model_name_or_path)
-    elif 'llama' in model_args.model_name_or_path.lower():
+    elif is_llama_model:
         model = model_class.from_pretrained(
             model_args.model_name_or_path,
             from_tf=bool(".ckpt" in model_args.model_name_or_path),

@@ -1158,6 +1158,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 "return_dict": return_dict,
             }
         )
+        dataset_names = kwargs.pop("Dataset", None)
 
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
             past_key_values = self.get_prompt(batch_size) #tuple len:24, torch.Size([4, 15, 16, 20, 64])
@@ -1231,7 +1232,6 @@ class PeftModelForSeq2SeqLM(PeftModel):
             
             # 简化参数处理
             task_id = kwargs.pop("task_id", 0)
-            dataset_names = kwargs.pop("Dataset", None)
             prompt_idx = kwargs.pop("prompt_idx", None)
             
             # 选择prompt
@@ -1413,8 +1413,27 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 task_id=_task_id,
                 train=self.training,
             )
-            selected_prompts = prompt_results["selected_prompts"].to(inputs_embeds.dtype)
-            p_tokens = selected_prompts
+            p_tokens = prompt_results["selected_prompts"].to(inputs_embeds.dtype)
+            if attention_mask is not None:
+                prefix_attention_mask = torch.ones(
+                    inputs_embeds.shape[0], p_tokens.shape[1], device=attention_mask.device, dtype=attention_mask.dtype
+                )
+                attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
+            else:
+                attention_mask = torch.ones(
+                    inputs_embeds.shape[0],
+                    p_tokens.shape[1] + inputs_embeds.shape[1],
+                    device=inputs_embeds.device,
+                    dtype=torch.long,
+                )
+
+            encoder_inputs = torch.cat((p_tokens, inputs_embeds), dim=1)
+            encoder = self.base_model.get_encoder()
+            encoder_outputs = encoder(inputs_embeds=encoder_inputs, attention_mask=attention_mask, return_dict=True)
+
+            model_kwargs["encoder_outputs"] = encoder_outputs
+            model_kwargs["attention_mask"] = attention_mask
+            return model_kwargs
         else:
             eprompt: HiDeEPrompt = self.prompt_encoder[self.active_adapter]
             # Optionally synthesize prompt_mask from task_id during generation if provided

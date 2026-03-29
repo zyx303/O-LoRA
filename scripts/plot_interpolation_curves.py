@@ -39,6 +39,11 @@ def parse_args():
         default=None,
         help="Optional custom chart title.",
     )
+    parser.add_argument(
+        "--include-overall",
+        action="store_true",
+        help="Also plot predict_exact_match as an overall curve.",
+    )
     return parser.parse_args()
 
 
@@ -95,21 +100,33 @@ def main():
     points.sort(key=lambda item: item[0])
 
     plt.figure(figsize=(9, 5.5))
-    for task_name in task_names:
+
+    if args.include_overall:
+        xs = []
+        ys = []
+        for alpha, metrics in points:
+            if "predict_exact_match" not in metrics:
+                continue
+            xs.append(1.0 - alpha)
+            ys.append(metrics["predict_exact_match"])
+        if xs:
+            plt.plot(xs, ys, marker="o", linewidth=2, label="overall")
+
+    for task_idx, task_name in enumerate(task_names, start=1):
         xs = []
         ys = []
         metric_key = f"{METRIC_PREFIX}{task_name}"
         for alpha, metrics in points:
             if metric_key not in metrics:
                 continue
-            xs.append(alpha)
+            xs.append(1.0 - alpha)
             ys.append(metrics[metric_key])
         if xs:
-            plt.plot(xs, ys, marker="o", linewidth=2, label=task_name)
+            plt.plot(xs, ys, marker="o", linewidth=2, label=f"{task_idx}-{task_name}")
 
     plt.xlabel("alpha")
-    plt.ylabel("exact match")
-    plt.title(args.title or f"Interpolation Accuracy vs Alpha ({args.eval_stage})")
+    plt.ylabel("accuracy(%)")
+    plt.title(args.title or f"Interpolation Accuracy vs Alpha")
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()

@@ -709,7 +709,7 @@ def main():
         print(f"Using HiDe-Prompt with {model_args.num_virtual_tokens} virtual tokens.")
         peft_config = HidePromptConfig(
             num_virtual_tokens=model_args.num_virtual_tokens,
-            task_type=TaskType.SEQ_2_SEQ_LM,
+            task_type=TaskType.CAUSAL_LM,
             inference_mode=False,
             prompt_key=False,
             pool_size=10,  # 明确设置prompt pool大小
